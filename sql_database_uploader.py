@@ -112,7 +112,6 @@ def lambda_handler(event, context):
         data={"text": message_slack_success}
         success = ssm.get_parameter(Name="success_hook_url", WithDecryption=True).get("Parameter").get("Value")
         r=http.request("POST", success, body=json.dumps(data), headers={"Content-Type":"application/json"})
-        
         for recipient in RECIPIENT_LIST:
             msg_text = message_slack_success
             msg = MIMEMultipart('alternative')
