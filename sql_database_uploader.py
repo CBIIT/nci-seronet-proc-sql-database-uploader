@@ -71,6 +71,7 @@ def lambda_handler(event, context):
     if db_name == "seronetdb-Vaccine_Response" and len(all_submissions) > 0:
         update_participant_info(connection_tuple)
         make_time_line(connection_tuple)
+    delete_data_files(bucket_name, file_key)
     ''''''
     email_host = "email-smtp.us-east-1.amazonaws.com"
     email_port = 587
@@ -2124,5 +2125,13 @@ def add_data_to_tables(df, prev_df, primary_key, table_name, conn, engine):
     except Exception as e:
         print(e)
 
-
+def delete_data_files(bucket_name, file_key):
+    s3_resource = boto3.resource('s3') 
+    bucket = s3_resource.Bucket(bucket_name)
+    subfolders = file_key.split('/')
+    # Get the first three sub folders
+    new_file_key = os.path.join(subfolders[0], subfolders[1], subfolders[2])
+    for obj in bucket.objects.filter(Prefix = new_file_key):
+        s3_resource.Object(bucket.name, obj.key).delete()
+    print(f'{new_file_key} deleted')
 
