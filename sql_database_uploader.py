@@ -2128,10 +2128,14 @@ def add_data_to_tables(df, prev_df, primary_key, table_name, conn, engine):
 def delete_data_files(bucket_name, file_key):
     s3_resource = boto3.resource('s3') 
     bucket = s3_resource.Bucket(bucket_name)
-    subfolders = file_key.split('/')
-    # Get the first three sub folders
-    new_file_key = os.path.join(subfolders[0], subfolders[1], subfolders[2])
-    for obj in bucket.objects.filter(Prefix = new_file_key):
-        s3_resource.Object(bucket.name, obj.key).delete()
-    print(f'{new_file_key} deleted')
-
+    if 'Vaccine+Response+Submissions' in file_key or 'Reference+Pannel+Submissions' in file_key:
+        subfolders = file_key.split('/')
+        # Get the first three sub folders
+        new_file_key = os.path.join(subfolders[0], subfolders[1], subfolders[2])
+        for obj in bucket.objects.filter(Prefix = new_file_key):
+            s3_resource.Object(bucket.name, obj.key).delete()
+        print(f'{new_file_key} deleted')
+    else:
+        for obj in bucket.objects.filter(Prefix = file_key):
+            s3_resource.Object(bucket.name, obj.key).delete()
+        print(f'{file_key} deleted')
