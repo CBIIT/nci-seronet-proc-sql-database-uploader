@@ -64,14 +64,19 @@ def lambda_handler(event, context):
     if any('Reference+Pannel+Submissions' in key for key in key_list):
         sub_folder = 'Reference Pannel Submissions'
         db_name = "seronetdb-Validated"
-    connection_tuple = connect_to_sql_db(host_client, user_name, user_password, db_name)
-    kwargs = {'Update_Assay_Data': Update_Assay_Data, 'Update_Study_Design': Update_Study_Design, 'Update_BSI_Tables': Update_BSI_Tables, 'Add_Blinded_Results': Add_Blinded_Results, "update_CDC_tables": update_CDC_tables}
-    file_key = key_list[0]
-    sql_table_dict, all_submissions = Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_name, **kwargs)
-    if db_name == "seronetdb-Vaccine_Response" and len(all_submissions) > 0:
-        update_participant_info(connection_tuple)
-        make_time_line(connection_tuple)
-    delete_data_files(bucket_name, file_key)
+    try:
+        connection_tuple = connect_to_sql_db(host_client, user_name, user_password, db_name)
+        kwargs = {'Update_Assay_Data': Update_Assay_Data, 'Update_Study_Design': Update_Study_Design, 'Update_BSI_Tables': Update_BSI_Tables, 'Add_Blinded_Results': Add_Blinded_Results, "update_CDC_tables": update_CDC_tables}
+        file_key = key_list[0]
+        sql_table_dict, all_submissions = Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_name, **kwargs)
+        if db_name == "seronetdb-Vaccine_Response" and len(all_submissions) > 0:
+            update_participant_info(connection_tuple)
+            make_time_line(connection_tuple)
+    except Exception as e:
+        error_msg.append(str(e))
+        print(e)
+    finally:
+        delete_data_files(bucket_name, file_key)
     ''''''
     email_host = "email-smtp.us-east-1.amazonaws.com"
     email_port = 587
@@ -1147,12 +1152,17 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                     curr_data = curr_data
                                     for i in range(0, len(curr_data)):
                                         if pd.isna(curr_data[i]):
-                                            curr_data[i] = 'NULL'
+                                            curr_data[i] = None
                                         if isinstance(curr_data[i], datetime.date):
                                             curr_data[i] = curr_data[i].strftime('%Y-%m-%d')
+                                        if type(curr_data[i]) == np.int64:
+                                            curr_data[i] = int(curr_data[i])
+                                        if type(curr_data[i]) == np.float64:
+                                            curr_data[i] = float(curr_data[i])
                                     curr_data_tuple = tuple(curr_data)
-                                    sql_query = (f"INSERT INTO {curr_table} {col_string} VALUES {curr_data_tuple}")
-                                    conn.execute(sql_query)
+                                    insert_str = str(tuple(["%s" for i in col_list])).replace("'", "")
+                                    sql_query = (f"INSERT INTO {curr_table} {col_string} VALUES {insert_str}")
+                                    conn.execute(sql_query, curr_data_tuple)
                                 #conn.connection.commit()
                         except Exception as e:
                             #print(e)
@@ -1202,9 +1212,19 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 test_table_name = "Biospecimen_" + curr_table
                 for index in test_table.index:
                     curr_data = test_table.loc[index, col_list].values.tolist()
+                    for i in range(0, len(curr_data)):
+                        if pd.isna(curr_data[i]):
+                            curr_data[i] = None
+                        if isinstance(curr_data[i], datetime.date):
+                            curr_data[i] = curr_data[i].strftime('%Y-%m-%d')
+                        if type(curr_data[i]) == np.int64:
+                            curr_data[i] = int(curr_data[i])
+                        if type(curr_data[i]) == np.float64:
+                            curr_data[i] = float(curr_data[i])
                     curr_data_tuple = tuple(curr_data)
-                    sql_query = (f"INSERT INTO {test_table_name} {col_string} VALUES {curr_data_tuple}")
-                    conn.execute(sql_query)
+                    insert_str = str(tuple(["%s" for i in col_list])).replace("'", "")
+                    sql_query = (f"INSERT INTO {test_table_name} {col_string} VALUES {insert_str}")
+                    conn.execute(sql_query, curr_data_tuple)
                 #conn.connection.commit()
     if len(not_done) > 0:
         add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_data_dict, tables_to_check, done_tables)
@@ -2132,6 +2152,7 @@ def delete_data_files(bucket_name, file_key):
         subfolders = file_key.split('/')
         # Get the first three sub folders
         new_file_key = os.path.join(subfolders[0], subfolders[1], subfolders[2])
+        new_file_key = new_file_key.replace('+', ' ')
         for obj in bucket.objects.filter(Prefix = new_file_key):
             s3_resource.Object(bucket.name, obj.key).delete()
         print(f'{new_file_key} deleted')
