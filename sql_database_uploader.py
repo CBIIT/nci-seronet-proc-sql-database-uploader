@@ -74,7 +74,8 @@ def lambda_handler(event, context):
             make_time_line(connection_tuple)
     except Exception as e:
         error_msg.append(str(e))
-        print(e)
+        #print(e)
+        raise(e)
     finally:
         delete_data_files(bucket_name, file_key)
     ''''''
@@ -1931,11 +1932,6 @@ def make_time_line(connection_tuple):
             x["Serum_Volume_For_FNL"][sub_data.index] = sub_data["Submitted_Serum_Volumne"]
             x["Num_PBMC_Vials_For_FNL"][sub_data.index] = sub_data["Submitted_PBMC_Vials"]
             x.columns = [i.replace("_x", "") for i in x.columns]
-            bucket_name = 'seronet-trigger-submissions-passed'
-            file_name = 'x.csv'
-            s3 = boto3.client('s3')
-            csv_buffer = x.to_csv(index=False).encode('utf-8')
-            s3.put_object(Bucket=bucket_name, Key=file_name, Body=csv_buffer)
             try:
                 start_date = max(d for d in x["Sunday_Prior_To_Visit_1"] if isinstance(d, datetime.date))
             except Exception:   #sunday prior is missing from accrual
