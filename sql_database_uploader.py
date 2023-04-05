@@ -74,8 +74,8 @@ def lambda_handler(event, context):
             make_time_line(connection_tuple)
     except Exception as e:
         error_msg.append(str(e))
-        #print(e)
-        raise(e)
+        print(e)
+        #raise(e)
     finally:
         delete_data_files(bucket_name, file_key)
     ''''''
