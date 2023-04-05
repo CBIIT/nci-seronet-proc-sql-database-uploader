@@ -61,8 +61,8 @@ def lambda_handler(event, context):
         Update_Study_Design = True
     if any('Serology_Data_Files/biorepository_id_map/' in key for key in key_list):
         Update_BSI_Tables = True
-    if any('Reference+Pannel+Submissions' in key for key in key_list):
-        sub_folder = 'Reference Pannel Submissions'
+    if any('Reference+Panel+Submissions' in key for key in key_list):
+        sub_folder = 'Reference Panel Submissions'
         db_name = "seronetdb-Validated"
     try:
         connection_tuple = connect_to_sql_db(host_client, user_name, user_password, db_name)
@@ -74,8 +74,8 @@ def lambda_handler(event, context):
             make_time_line(connection_tuple)
     except Exception as e:
         error_msg.append(str(e))
-        print(e)
-        #raise(e)
+        #display_error_line(e)
+        raise(e)
     finally:
         delete_data_files(bucket_name, file_key)
     ''''''
@@ -180,7 +180,7 @@ def connect_to_sql_db(host_client, user_name, user_password, file_dbname):
                 sql_column_df = pd.concat([sql_column_df, pd.DataFrame.from_records([curr_dict])])
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
     print("## Sucessfully Connected to " + file_dbname + " ##")
     sql_column_df.reset_index(inplace=True, drop=True)
     return sql_column_df, engine, conn
@@ -209,7 +209,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
     #bucket_name = "seronet-demo-submissions-passed"
     data_release = "2.0.0"
 
-    if sub_folder == "Reference Pannel Submissions":
+    if sub_folder == "Reference Panel Submissions":
         sql_table_dict = get_sql_dict_ref(s3_client, bucket_name)
     elif sub_folder == "Vaccine Response Submissions":
         sql_table_dict = get_sql_dict_vacc(s3_client, bucket_name)
@@ -264,7 +264,6 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         file_key = file_key.replace('+', ' ')
 
         all_submissions = [i for i in all_submissions if file_key in i]
-        print(all_submissions)
         time_stamp = [i.split("/")[2] for i in all_submissions]
         for i in time_stamp:
             if i[2] == '-':
@@ -279,6 +278,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         all_submissions = [i for i in enumerate(zip(all_submissions, cbc_code))]
         # Filter list by submissions already done
         all_submissions = [i for i in all_submissions if i[1][0] not in done_submissions["Submission_S3_Path"].tolist()]
+        print(all_submissions)
         if len(all_submissions) == 0:
             loading_result = 'submission duplicated'
         #  all_submissions = [i for i in all_submissions if "CBC02" in i[1][0]]
@@ -286,7 +286,8 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
     except Exception as e:
         all_submissions = []
         error_msg.append(str(e))
-        print(e)
+        #display_error_line(e)
+        raise(e)
 ############################################################################################################################
     master_dict = {}  # dictionary for all submissions labeled as create
     update_dict = {}  # dictionary for all submissions labeled as update
@@ -299,7 +300,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
                 index = curr_sub[0]# + 1
             except Exception as e:
                 error_msg.append(str(e))
-                print(e)
+                display_error_line(e)
 
             folder_path, folder_tail = os.path.split(curr_sub[1][0])
             file_name = curr_sub[1][0].split("/")
@@ -389,7 +390,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
                             eval_data = pd.concat([eval_data, x])
                     except Exception as e:
                         error_msg.append(str(e))
-                        print(e)
+                        display_error_line(e)
                 eval_data.reset_index(inplace=True, drop=True)
                 sub_id = eval_data.loc[eval_data['Subaliquot_ID'].str.contains('FD|FS')]
                 bsi_id = eval_data.loc[~eval_data['Subaliquot_ID'].str.contains('FD|FS')]
@@ -416,7 +417,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
                             CDC_data_IgM = create_CDC_data(s3_client, bucket, curr_file, "IgM", CDC_data_IgM, file_date)
                     except Exception as e:
                         error_msg.append(str(e))
-                        print(e)
+                        display_error_line(e)
                 CDC_Data = pd.concat([CDC_data_IgM, CDC_data_IgG])
 
                 CDC_Data["BSI_Parent_ID"] = [i[:7] + " 0001" for i in CDC_Data["Patient ID"].tolist()]
@@ -637,7 +638,7 @@ def get_data_dict(s3_client, bucket, files, conn, curr_sub, sub_name, index, upl
             curr_table.rename(columns={"Cohort": "CBC_Classification"})
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
         curr_table = clean_up_tables(curr_table)
         curr_table["Submission_CBC"] = curr_sub[1][1]
         if "secondary_confirmation" in split_path[1]:
@@ -669,7 +670,7 @@ def update_obesity_values(master_data_dict):
         baseline["BMI"] = baseline["BMI"].replace(-1e9, np.nan)
     except Exception as e:
         error_msg.append(str(e))
-        print(e)
+        display_error_line(e)
 
     master_data_dict["baseline.csv"]["Data_Table"] = baseline
     return master_data_dict
@@ -711,7 +712,7 @@ def get_master_dict(master_data_dict, master_data_update, sql_column_df, sql_tab
                 master_data_dict[key]["Data_Table"] = x
             except Exception as e:
                 error_msg.append(str(e))
-                print(e)
+                display_error_line(e)
 
     for key in master_data_update.keys():  # key only in update
         if key not in master_data_dict.keys():
@@ -880,7 +881,7 @@ def combine_dictionaries(master_data_dict, data_dict):
                 master_data_dict[curr_file]["Data_Table"] = x
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
     return master_data_dict
 
 
@@ -929,7 +930,7 @@ def zero_pad_ids(data_list):
         data_list = [i[0:13] + "_0" + i[14] if i[-2] == '_' else i for i in data_list]
     except Exception as e:
         error_msg.append(str(e))
-        print(e)
+        display_error_line(e)
     finally:
         return data_list
 
@@ -1038,7 +1039,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     x.drop_duplicates(inplace=True)
                 except Exception as e:
                     error_msg.append(str(e))
-                    print(e)
+                    display_error_line(e)
                 output_file = pd.concat([output_file, x])
                 if len(processing_data) > 0 and len(processing_file) > 0:
                     processing_file = pd.concat([processing_file, processing_data])
@@ -1091,7 +1092,6 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     if "Sunday_Prior_To_First_Visit" in output_file.columns:
                         output_file["Sunday_Prior_To_First_Visit"] = output_file["Sunday_Prior_To_First_Visit"].replace(-1e9, datetime.date(2000,1,1))
                         sql_df["Sunday_Prior_To_First_Visit"] = sql_df["Sunday_Prior_To_First_Visit"].replace("No Data", datetime.date(2000,1,1))
-
                     try:
                         z = output_file.merge(sql_df, how="outer", indicator=True)
                     except Exception:
@@ -1100,8 +1100,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     finally:
                         new_data = z.query("_merge == 'left_only'")       # new or update data
                 except Exception as e:
-                    error_msg.append(str(e))
-                    print(e)
+                    #error_msg.append(str(e))
+                    display_error_line(e)
                     new_data = []
 
                 if len(new_data) > 0:
@@ -1117,7 +1117,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         update_data = merge_data.query("_merge == 'both'")
                     except Exception as e:
                         error_msg.append(str(e))
-                        print(e)
+                        display_error_line(e)
 
                     if len(new_data) > 0:
                         if "_merge" in new_data.columns:
@@ -1166,7 +1166,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                     conn.execute(sql_query, curr_data_tuple)
                                 #conn.connection.commit()
                         except Exception as e:
-                            #print(e)
+                            #display_error_line(e)
                             error_msg.append(str(e))
                             print("error loading table")
                     if len(update_data) > 0:
@@ -1176,7 +1176,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                             success_msg.append(f"## Updating {row_count} Rows in table: {curr_table} ##")
                             update_tables(conn, engine, primary_keys, update_data, curr_table)
                         except:
-                            print(e)
+                            display_error_line(e)
                             error_msg.append(str(e))
 
                 else:
@@ -1286,7 +1286,7 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
                 x = x.merge(visit_data)
             except Exception as e:
                 error_msg.append(str(e))
-                print(e)
+                display_error_line(e)
     if "Biospecimen_" in curr_table and "Test_Results" not in curr_table:
         table_name = curr_table.replace("Biospecimen_", "")
         table_data = pd.read_sql((f"SELECT * FROM {table_name}"), conn)
@@ -1313,7 +1313,7 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
             x = x.merge(tube_data, how="left", indicator=True)
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
 
         if curr_table == "Biospecimen":
             x.rename(columns={"Collection_Tube_ID": "Biospecimen_Tube_ID"}, inplace=True)
@@ -1370,12 +1370,12 @@ def get_bio_target(curr_table, conn):
         curr_table = curr_table.merge(bio_table)
     except Exception as e:
         error_msg.append(str(e))
-        print(e)
+        display_error_line(e)
     return curr_table
 
 
 def get_bsi_files(s3_client, bucket, sub_folder, master_data_dict):
-    if sub_folder == "Reference Pannel Submissions":
+    if sub_folder == "Reference Panel Submissions":
         curr_file = "Serology_Data_Files/biorepository_id_map/Biorepository_ID_Reference_Panel_map.xlsx"
     elif sub_folder == "Vaccine Response Submissions":
         curr_file = "Serology_Data_Files/biorepository_id_map/Biorepository_ID_Vaccine_Response_map.xlsx"
@@ -1440,7 +1440,7 @@ def update_tables(conn, engine, primary_keys, update_table, sql_table):
             conn.execute(sql_query)
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
         #finally:
             #conn.connection.commit()
 
@@ -1669,7 +1669,7 @@ def update_participant_info(connection_tuple):
     try:
         new_data.to_sql(name="Visit_One_Offset_Correction", con=engine, if_exists="append", index=False)
     except Exception as e:
-        print(e)
+        display_error_line(e)
     finally:
         conn.connection.commit()
     for curr_part in update_data.index:
@@ -1678,7 +1678,7 @@ def update_participant_info(connection_tuple):
                        f"where Research_Participant_ID = '{update_data.loc[curr_part, 'Research_Participant_ID']}'")
             conn.execute(sql_qry)
         except Exception as e:
-            print(e)
+            display_error_line(e)
         finally:
             conn.connection.commit()
 
@@ -1695,7 +1695,7 @@ def update_participant_info(connection_tuple):
                        f"where Research_Participant_ID = '{check_data.loc[curr_part, 'Research_Participant_ID']}'")
             conn.execute(sql_qry)
         except Exception as e:
-            print(e)
+            display_error_line(e)
         finally:
             conn.connection.commit()
 #########  Update the Primary Cohort feild using accrual reports ###################
@@ -1715,7 +1715,7 @@ def update_participant_info(connection_tuple):
                        f"where Visit_Info_ID = '{y.loc[curr_part, 'Visit_Info_ID']}'")
             conn.execute(sql_qry)
         except Exception as e:
-            print(e)
+            display_error_line(e)
         finally:
             conn.connection.commit()
 
@@ -1730,7 +1730,7 @@ def update_participant_info(connection_tuple):
             sql_query = f"Update Participant_Visit_Info set Data_Release_Version = '3.0.0' where Visit_Info_ID = '{visit_id }'"
             conn.execute(sql_query)
         except Exception as e:
-            print(e)
+            display_error_line(e)
         finally:
             conn.connection.commit()
 
@@ -1871,7 +1871,7 @@ def make_time_line(connection_tuple):
             y["Average_Duration_Of_Test"] = [float(i) for i in y["Average_Duration_Of_Test"]]
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
 
         y = y.query("Average_Duration_Of_Test >= 0 or Average_Duration_Of_Test <= 0")
 
@@ -1908,7 +1908,7 @@ def make_time_line(connection_tuple):
             x = x.drop_duplicates('Normalized_Visit_Index', keep='first').reset_index(drop=True)
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
 
         try:
             x["Data_Status"] = "Accrual Data: Future"
@@ -1926,7 +1926,7 @@ def make_time_line(connection_tuple):
                 x["Duration_From_Visit_1_x"][sub_data.index] = sub_data["Duration_From_Visit_1_y"]
         except Exception as e:
             error_msg.append(str(e))
-            print(e)
+            display_error_line(e)
         try:
             x = x.merge(pending_samples, how="left")
             x["Serum_Volume_For_FNL"][sub_data.index] = sub_data["Submitted_Serum_Volumne"]
@@ -1946,7 +1946,7 @@ def make_time_line(connection_tuple):
             all_vacc = pd.concat([all_vacc, x[col_list_1]])
             all_sample = pd.concat([all_sample, x[col_list_2]])
         except Exception as e:
-            print(e) #stop the whole function when there is nothing to add to the table
+            display_error_line(e) #stop the whole function when there is nothing to add to the table
     try:
         all_vacc.reset_index(inplace=True, drop=True)
         all_sample.reset_index(inplace=True, drop=True)
@@ -1966,7 +1966,7 @@ def make_time_line(connection_tuple):
         conn.connection.commit()
     except Exception as e:
         error_msg.append(str(e))
-        print(e)
+        display_error_line(e)
     print('file done')
 
 def clean_up_visit(visit, vaccine):
@@ -1983,7 +1983,7 @@ def clean_up_visit(visit, vaccine):
         df["Duration_Between_Vaccine_and_Visit"] = 0
         df.reset_index(inplace=True, drop=True)
     except Exception as e:
-        print(e)
+        display_error_line(e)
     return df
 
 
@@ -2011,7 +2011,7 @@ def combine_visit_and_vacc(df):
             df = get_vaccine_data(df, visit_index, last_visit)
         df = df.query("Normalized_Visit_Index > 0")
     except Exception as e:
-        print(e)
+        display_error_line(e)
     return df
 
 
@@ -2042,7 +2042,7 @@ def add_covid_test(df, curr_vacc, y):
                 df["Previous Vaccion Dosage"][visit_index] = df["Vaccination_Status"][visit_index]
                 df["Test_Duration_Since_Vaccine"][visit_index] = duration - x[-1:]["Duration_From_Visit_1"].iloc[0]
         except Exception as e:
-            print(e)
+            display_error_line(e)
     return df
 
 
@@ -2068,7 +2068,7 @@ def get_vaccine_data(curr_sample, visit_index, last_visit):
                 curr_sample["SARS-CoV-2_Vaccine_Type"][test_val+offset] = "N/A"
                 curr_sample["Duration_Between_Vaccine_and_Visit"][test_val+offset]=  np.nan
         except Exception as e:
-            print(e)
+            display_error_line(e)
     return curr_sample
 
 
@@ -2111,7 +2111,7 @@ def add_data_to_tables(df, prev_df, primary_key, table_name, conn, engine):
         merge_data = merge_data.merge(prev_df, on=primary_key, how="left", indicator=True)
         new_data = merge_data.query("_merge == 'left_only'").drop('_merge', axis=1)
     except Exception as e:
-        print(e)
+        display_error_line(e)
     try:
         if not new_data is None:
             new_data.columns = [i.replace("_x", "") for i in new_data.columns]
@@ -2125,7 +2125,7 @@ def add_data_to_tables(df, prev_df, primary_key, table_name, conn, engine):
             print(f"0 Visits have been added in {table_name}")
             success_msg.append(f"0 Visits have been added in {table_name}")
     except Exception as e:
-        print(e)
+        display_error_line(e)
 
     try:
         update_data = merge_data.query("_merge == 'both'").drop('_merge', axis=1)
@@ -2139,12 +2139,13 @@ def add_data_to_tables(df, prev_df, primary_key, table_name, conn, engine):
             print(f"0 Visits have been updated in {table_name}")
             success_msg.append(f"0 Visits have been updated in {table_name}")
     except Exception as e:
-        print(e)
+        display_error_line(e)
 
 def delete_data_files(bucket_name, file_key):
+    global success_msg
     s3_resource = boto3.resource('s3') 
     bucket = s3_resource.Bucket(bucket_name)
-    if 'Vaccine+Response+Submissions' in file_key or 'Reference+Pannel+Submissions' in file_key:
+    if 'Vaccine+Response+Submissions' in file_key or 'Reference+Panel+Submissions' in file_key:
         subfolders = file_key.split('/')
         # Get the first three sub folders
         new_file_key = os.path.join(subfolders[0], subfolders[1], subfolders[2])
@@ -2152,7 +2153,9 @@ def delete_data_files(bucket_name, file_key):
         for obj in bucket.objects.filter(Prefix = new_file_key):
             s3_resource.Object(bucket.name, obj.key).delete()
         print(f'{new_file_key} deleted')
+        success_msg.append(f'{new_file_key} deleted')
     else:
         for obj in bucket.objects.filter(Prefix = file_key):
             s3_resource.Object(bucket.name, obj.key).delete()
         print(f'{file_key} deleted')
+        success_msg.append(f'{file_key} deleted')
