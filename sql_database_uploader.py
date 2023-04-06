@@ -1166,7 +1166,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                     conn.execute(sql_query, curr_data_tuple)
                                 #conn.connection.commit()
                         except Exception as e:
-                            #display_error_line(e)
+                            display_error_line(e)
                             error_msg.append(str(e))
                             print("error loading table")
                     if len(update_data) > 0:
@@ -1402,11 +1402,13 @@ def update_tables(conn, engine, primary_keys, update_table, sql_table):
     global error_msg
     key_str = ['`' + str(s) + '`' + " like '%s'" for s in primary_keys]
     key_str = " and ".join(key_str)
-    if "Sunday_Prior_To_First_Visit" in update_table:
-        update_table = update_table[["Research_Participant_ID", "Age", "Sunday_Prior_To_First_Visit"]]
-    else:
-        update_table.drop("_merge", inplace=True, axis=1)
-
+    try:
+        if "Sunday_Prior_To_First_Visit" in update_table:
+            update_table = update_table[["Research_Participant_ID", "Age", "Sunday_Prior_To_First_Visit"]]
+        else:
+            update_table.drop("_merge", inplace=True, axis=1)
+    except Exception as e:
+        print(e)
     col_list = update_table.columns.tolist()
     col_list = [i for i in col_list if i not in primary_keys]
 
