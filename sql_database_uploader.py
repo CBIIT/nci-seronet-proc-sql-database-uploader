@@ -1255,7 +1255,6 @@ def fix_char_cols(df, char_cols):
 
 
 def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
-    global error_msg
     col_list = y["Column_Name"].tolist()
     if "Normalized_Cohort" in col_list:   # this will be removed once tempaltes updated
         col_list.remove("Normalized_Cohort")
@@ -1264,9 +1263,9 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
     if "Data_Release_Version" in col_list and curr_file not in ["baseline.csv"]:
         col_list.remove("Data_Release_Version")
 
-    if curr_table == "Participant":
-        if "Sunday_Prior_To_First_Visit" not in x.columns:
-            x["Sunday_Prior_To_First_Visit"] =  datetime.date(2000,1,1)
+    #if curr_table == "Participant":
+    #    if "Sunday_Prior_To_First_Visit" not in x.columns:
+    #        x["Sunday_Prior_To_First_Visit"] =  datetime.date(2000,1,1)
 
     if curr_table == "Participant_Visit_Info":
         if "Primary_Study_Cohort" not in x.columns:
@@ -1277,16 +1276,16 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
     else:
         if "Visit_Info_ID" in col_list:
             visit_data = pd.read_sql(("SELECT Visit_Info_ID, Research_Participant_ID, Visit_Number FROM Participant_Visit_Info;"), conn)
-            visit_data["Visit_Number"] = [int(i) for i in visit_data["Visit_Number"]]
+            list_of_visits = list(range(1,20)) + [str(i) for i in list(range(1,20))] 
+            visit_data["Visit_Number"] = [int(i) if i in list_of_visits else i for i in visit_data["Visit_Number"]]
             if curr_file == "baseline.csv":
                 x["Visit_Number"] = 1
             x.replace("Baseline(1)", 1, inplace=True)
             try:
-                x["Visit_Number"] = [int(i) for i in x["Visit_Number"]]
+                x["Visit_Number"] = [int(i) if i in list_of_visits else i for i in x["Visit_Number"]]
                 x = x.merge(visit_data)
             except Exception as e:
-                error_msg.append(str(e))
-                display_error_line(e)
+                print(e)
     if "Biospecimen_" in curr_table and "Test_Results" not in curr_table:
         table_name = curr_table.replace("Biospecimen_", "")
         table_data = pd.read_sql((f"SELECT * FROM {table_name}"), conn)
@@ -1312,8 +1311,7 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
                     pass  # not a character col
             x = x.merge(tube_data, how="left", indicator=True)
         except Exception as e:
-            error_msg.append(str(e))
-            display_error_line(e)
+            print(e)
 
         if curr_table == "Biospecimen":
             x.rename(columns={"Collection_Tube_ID": "Biospecimen_Tube_ID"}, inplace=True)
@@ -1325,13 +1323,12 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
                 x['Submission_CBC'] = [str(i[:2]) for i in x["Research_Participant_ID"]]
             else:
                 x['Submission_CBC'] = [str(i[:2]) for i in x["Biospecimen_ID"]]
-        x = x[col_list]
+        x = x[[i for i in col_list if i in x.columns]]
+        #x = x[col_list]
     except Exception as e:
-        error_msg.append(str(e))
         display_error_line(e)
         return []
     return x
-
 
 def updated_derived(x):
     x["Derived_Result"] = [str(i).replace("<", "") for i in x["Derived_Result"]]
