@@ -74,8 +74,8 @@ def lambda_handler(event, context):
             make_time_line(connection_tuple)
     except Exception as e:
         error_msg.append(str(e))
-        #display_error_line(e)
-        raise(e)
+        display_error_line(e)
+        #raise(e)
     finally:
         delete_data_files(bucket_name, file_key)
     ''''''
@@ -228,31 +228,6 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         done_submissions = pd.read_sql(("SELECT * FROM Submission"), conn)  # list of all submissions previously done in db
         done_submissions.drop_duplicates("Submission_S3_Path", inplace=True)
 
-        # cohort_doc = pd.read_excel(r"C:\Users\breadsp2\Downloads\Release_1.0.0_by_cohort (2).xlsx")
-        # cohort_doc.rename(columns={"Cohort": "Primary_Study_Cohort"}, inplace=True)
-        # cohort_doc.drop("CBC", axis=1, inplace=True)
-        # for index in cohort_doc.index:
-        #     part_id = cohort_doc["Research_Participant_ID"][index]
-        #     cohort_name = cohort_doc["Primary_Study_Cohort"][index]
-        #     sql_query = f"Update Participant_Visit_Info set Primary_Study_Cohort = '{cohort_name}' where Research_Participant_ID = '{part_id}'"
-        #     engine.execute(sql_query)
-        #     conn.connection.commit()
-
-        #part_data = pd.read_sql(("SELECT * FROM `seronetdb-Vaccine_Response`.Participant;"), conn)
-        #v1 = part_data.query("Sunday_Prior_To_First_Visit > datetime.date(2000,1,1,)")
-        #v2 = part_data.query("Sunday_Prior_To_First_Visit == datetime.date(2000,1,1,)")
-
-        #part_list = "'" + ("', '").join(v1["Research_Participant_ID"].tolist()) + "'"
-        #sql_qry = f"update Participant_Visit_Info set Data_Release_Version = '1.1.0' where Research_Participant_ID in ({part_list})"
-        #engine.execute(sql_qry)
-        #conn.connection.commit()
-
-        #part_list = "'" + ("', '").join(v2["Research_Participant_ID"].tolist()) + "'"
-        #sql_qry = f"update Participant_Visit_Info set Data_Release_Version = '2.0.0' where Research_Participant_ID in ({part_list})"
-        #engine.execute(sql_qry)
-        #conn.connection.commit()
-
-
         all_submissions = []  # get list of all submissions by CBC
         cbc_code = []
         all_submissions, cbc_code = get_all_submissions(s3_client, bucket_name, sub_folder, "Feinstein_CBC01", 41, all_submissions, cbc_code)
@@ -261,7 +236,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         all_submissions, cbc_code = get_all_submissions(s3_client, bucket_name, sub_folder, "Mt_Sinai_CBC04", 14, all_submissions, cbc_code)
         #all_submissions = [os.path.dirname(file_key)]
         file_key = os.path.dirname(file_key)
-        file_key = file_key.replace('+', ' ')
+        file_key = file_key.replace("+", " ").replace("%28","(").replace("%29",")")
 
         all_submissions = [i for i in all_submissions if file_key in i]
         time_stamp = [i.split("/")[2] for i in all_submissions]
@@ -279,8 +254,6 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         # Filter list by submissions already done
         all_submissions = [i for i in all_submissions if i[1][0] not in done_submissions["Submission_S3_Path"].tolist()]
         print(all_submissions)
-        if len(all_submissions) == 0:
-            loading_result = 'submission duplicated'
         #  all_submissions = [i for i in all_submissions if "CBC02" in i[1][0]]
 
     except Exception as e:
@@ -295,9 +268,12 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
     #  all_submissions = all_submissions[-5:]
 
     try:
+        i = 1
         for curr_sub in all_submissions:
             try:
-                index = curr_sub[0]# + 1
+                #index = curr_sub[0]# + 1
+                index = max(done_submissions["Submission_Index"].tolist()) + i
+                i += 1
             except Exception as e:
                 error_msg.append(str(e))
                 display_error_line(e)
@@ -339,8 +315,9 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
 
         if "baseline.csv" in master_data_dict:
             master_data_dict = update_obesity_values(master_data_dict)
-        #    master_data_dict = {"baseline.csv": master_data_dict["baseline.csv"], "submission.csv": master_data_dict["submission.csv"]}
-
+            x = master_dict['baseline.csv']["Data_Table"]
+            x = x.query("Age > 0")
+            master_dict['baseline.csv']["Data_Table"] = x.drop_duplicates('Research_Participant_ID')
         #if study_type == "Vaccine_Response":
         #    cohort_file = r"C:\Users\breadsp2\Downloads\Release_1.0.0_by_cohort.xlsx"
         #    x = pd.read_excel(cohort_file)
@@ -438,6 +415,8 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
             else:
                 print("roll back")
                 conn.connection.rollback()
+
+
 
     except Exception as e:
         display_error_line(e)
@@ -975,7 +954,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
     key_count = key_count.query("Table_Name not in @done_tables")
     if len(key_count) == 0:
         return
-    error_msg_len = len(error_msg)
+
     for curr_table in key_count["Table_Name"].tolist():
         if curr_table in tables_to_check:
             check_foreign = key_count.query("Table_Name == @curr_table and 1.0 > 0")
@@ -1004,6 +983,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
 
         csv_file = [key for key, value in sql_table_dict.items() if curr_table in value]
         output_file = pd.DataFrame(columns=y["Column_Name"].tolist())
+        if 'Sunday_Prior_To_First_Visit' in output_file.columns:
+            output_file.drop("Sunday_Prior_To_First_Visit", inplace=True, axis=1)
         processing_file = []
         processing_data = []
         if len(csv_file) == 0:
@@ -1034,6 +1015,12 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     if curr_file in ["equipment.csv", "consumable.csv", "reagent.csv"]:
                         processing_data = copy.copy(x)
                     x = get_col_names(x, y, conn, curr_table, curr_file, sql_column_df)
+                    '''
+                    if curr_table == "Tube":
+                        csv_buffer = x.to_csv(index=False).encode()
+                        s3_client = boto3.client('s3')
+                        s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Tube.csv')
+                    '''
                     if len(x) == 0:
                         continue
                     x.drop_duplicates(inplace=True)
@@ -1056,6 +1043,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 output_file.reset_index(inplace=True, drop=True)
                 output_file = fix_aliquot_ids(output_file, "first", sql_column_df)
                 output_file.replace("N/A", "No Data", inplace=True)
+                output_file.replace("nan", "No Data", inplace=True)
 
                 comment_col = [i for i in output_file.columns if "Comments" in i]
                 if len(comment_col) > 0:
@@ -1089,9 +1077,24 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     output_file.replace({"": "No Data"}, inplace=True)
                     sql_df = sql_df.replace(np.nan, -1e9)
                     output_file = output_file.replace(np.nan, -1e9)
+
+                    if "Primary_Study_Cohort" in output_file.columns:
+                        output_file.drop("Primary_Study_Cohort", axis=1, inplace=True)
+                    if 'Data_Release_Version' in output_file.columns:
+                        output_file.drop('Data_Release_Version', axis=1, inplace=True)
+
+                    print()
+                    output_file.replace('Lymphocytes', 'PBMC', inplace=True)
+                    output_file.replace('Gist', 'GIST', inplace=True)
+                    if curr_table == "Biospecimen":
+                        output_file = output_file.sort_values(["Biospecimen_ID", "Biospecimen_Collection_Date_Duration_From_Index"])
+                        output_file.drop_duplicates(["Visit_Info_ID", "Biospecimen_ID"], keep="last", inplace=True)
+
                     if "Sunday_Prior_To_First_Visit" in output_file.columns:
-                        output_file["Sunday_Prior_To_First_Visit"] = output_file["Sunday_Prior_To_First_Visit"].replace(-1e9, datetime.date(2000,1,1))
+                        #output_file["Sunday_Prior_To_First_Visit"] = output_file["Sunday_Prior_To_First_Visit"].replace(-1e9, datetime.date(2000,1,1))
                         sql_df["Sunday_Prior_To_First_Visit"] = sql_df["Sunday_Prior_To_First_Visit"].replace("No Data", datetime.date(2000,1,1))
+                    if 'Submission_Index' not in primary_keys and 'Submission_Index' in sql_df.columns:
+                        sql_df.drop('Submission_Index', axis=1, inplace=True)
                     try:
                         z = output_file.merge(sql_df, how="outer", indicator=True)
                     except Exception:
@@ -1123,9 +1126,17 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         if "_merge" in new_data.columns:
                             new_data.drop("_merge", inplace=True, axis=1)
                         try:
+                            #for testing
+                            '''
+                            if curr_table == "Biospecimen":
+                                csv_buffer = new_data.to_csv(index=False).encode()
+                                s3_client = boto3.client('s3')
+                                s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Biospecimen_new.csv')
+                            '''
                             if len(new_data) > 0:
-                                print(f"## Adding New Rows to table: {curr_table} ##")
-                                success_msg.append(f"## Adding New Rows to table: {curr_table} ##")
+                                new_data_count = len(new_data)
+                                print(f"## Adding {new_data_count} Rows to table: {curr_table} ##")
+                                success_msg.append(f"## Adding {new_data_count} Rows to table: {curr_table} ##")
                                 new_data.replace("No Data", np.nan, inplace=True)
                                 new_data.replace(datetime.date(2000,1,1), np.nan, inplace=True)
                                 if "Current Label" in new_data.columns:
@@ -1136,34 +1147,14 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
 
                                     new_data = new_data.query("`Current Label` not in ['32_441083_311_01','32_441153_311_01','32_441112_304_01','32_441095_305_01','32_441108_301_01', " +
                                                               "'32_441139_305_01','32_441013_311_01','32_441146_304_01','32_441165_304_01','32_441131_101_01']")
-
-                                #new_data.to_sql(name=curr_table, con=engine, if_exists="append", index=False)
-                                #Replace to_sql because to_sql have auto_commit
-                                col_list = new_data.columns.tolist()
-                                col_string = ''
-                                for i in range(0, len(col_list)):
-                                    if i == 0:
-                                        col_string = '(' + '`' + str(col_list[i]) + '`'
-                                    elif i == len(col_list) - 1:
-                                        col_string = col_string + ', ' + '`' + str(col_list[i]) + '`' + ')'
-                                    else:
-                                        col_string = col_string + ', ' + '`' + str(col_list[i]) + '`'
-                                for index in new_data.index:
-                                    curr_data = new_data.loc[index, col_list].values.tolist()
-                                    curr_data = curr_data
-                                    for i in range(0, len(curr_data)):
-                                        if pd.isna(curr_data[i]):
-                                            curr_data[i] = None
-                                        if isinstance(curr_data[i], datetime.date):
-                                            curr_data[i] = curr_data[i].strftime('%Y-%m-%d')
-                                        if type(curr_data[i]) == np.int64:
-                                            curr_data[i] = int(curr_data[i])
-                                        if type(curr_data[i]) == np.float64:
-                                            curr_data[i] = float(curr_data[i])
-                                    curr_data_tuple = tuple(curr_data)
-                                    insert_str = str(tuple(["%s" for i in col_list])).replace("'", "")
-                                    sql_query = (f"INSERT INTO {curr_table} {col_string} VALUES {insert_str}")
-                                    conn.execute(sql_query, curr_data_tuple)
+                                if "Treatment_History" in curr_table:
+                                    new_data = new_data.drop_duplicates(['Visit_Info_ID', 'Health_Condition_Or_Disease', 'Treatment', 'Dosage', 'Dosage_Units'])
+                                if curr_table == "Biospecimen_Test_Results":
+                                    print("x")
+                                for column in new_data.columns:
+                                    if column not in list(sql_df.columns):
+                                        new_data.drop(column, axis=1, inplace=True)
+                                new_data.to_sql(name=curr_table, con=conn, if_exists="append", index=False)
                                 #conn.connection.commit()
                         except Exception as e:
                             display_error_line(e)
@@ -1171,6 +1162,13 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                             print("error loading table")
                     if len(update_data) > 0:
                         try:
+                            #for testing
+                            '''
+                            if curr_table == "Biospecimen":
+                                csv_buffer = update_data.to_csv(index=False).encode()
+                                s3_client = boto3.client('s3')
+                                s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Biospecimen_update.csv')
+                            '''
                             row_count = len(update_data)
                             print(f"\n## Updating {row_count} Rows in table: {curr_table} ##\n")
                             success_msg.append(f"## Updating {row_count} Rows in table: {curr_table} ##")
@@ -1184,6 +1182,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     success_msg.append(f"## {curr_table} has been checked, no data to add")
             else:
                 print(f" \n## {curr_table} was not found in submission, nothing to add")
+                success_msg.append(f" \n## {curr_table} was not found in submission, nothing to add")
             if len(processing_file) > 0 and "Biospecimen" in done_tables:
                 prim_table = pd.read_sql((f"Select * from {curr_table}"), conn)
                 prim_table.fillna("No Data", inplace=True)  # replace NULL values from sql with "No Data" for merge purposes
@@ -1199,33 +1198,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 test_table = test_table.merge(sql_table, how="left", indicator=True)
                 test_table = test_table.query("_merge == 'left_only'").drop("_merge", axis=1)
                 test_table.drop_duplicates(inplace=True)
-                #test_table.to_sql(name="Biospecimen_" + curr_table, con=engine, if_exists="append", index=False)
-                col_list = test_table.columns.tolist()
-                col_string = ''
-                test_table = test_table.replace(np.nan, None)
-                for i in range(0, len(col_list)):
-                    if i == 0:
-                        col_string = '(' + str(col_list[i])
-                    elif i == len(col_list) - 1:
-                        col_string = col_string + ', ' + str(col_list[i]) + ')'
-                    else:
-                        col_string = col_string + ', ' + str(col_list[i])
-                test_table_name = "Biospecimen_" + curr_table
-                for index in test_table.index:
-                    curr_data = test_table.loc[index, col_list].values.tolist()
-                    for i in range(0, len(curr_data)):
-                        if pd.isna(curr_data[i]):
-                            curr_data[i] = None
-                        if isinstance(curr_data[i], datetime.date):
-                            curr_data[i] = curr_data[i].strftime('%Y-%m-%d')
-                        if type(curr_data[i]) == np.int64:
-                            curr_data[i] = int(curr_data[i])
-                        if type(curr_data[i]) == np.float64:
-                            curr_data[i] = float(curr_data[i])
-                    curr_data_tuple = tuple(curr_data)
-                    insert_str = str(tuple(["%s" for i in col_list])).replace("'", "")
-                    sql_query = (f"INSERT INTO {test_table_name} {col_string} VALUES {insert_str}")
-                    conn.execute(sql_query, curr_data_tuple)
+                test_table.to_sql(name="Biospecimen_" + curr_table, con=conn, if_exists="append", index=False)
                 #conn.connection.commit()
     if len(not_done) > 0:
         add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_data_dict, tables_to_check, done_tables)
@@ -1454,25 +1427,20 @@ def get_sql_dict_ref(s3_client, bucket):
     sql_table_dict["assay_qc.csv"] = ["Assay_Quality_Controls"]
     sql_table_dict["assay_conversion.csv"] = ["Assay_Organism_Conversion"]
     sql_table_dict["validation_assay_data.csv"] = ["Validation_Panel_Assays"]
-
     sql_table_dict["aliquot.csv"] = ["Tube", "Aliquot"]
     sql_table_dict["biospecimen.csv"] = ["Tube", "Biospecimen"]
-
     sql_table_dict["confirmatory_clinical_test.csv"] = ["Confirmatory_Clinical_Test"]
     sql_table_dict["demographic.csv"] = ["Participant"]  # , "Prior_Covid_Outcome", "Participant_Comorbidity_Reported", "Comorbidity"]
     sql_table_dict["prior_clinical_test.csv"] = ["Participant_Prior_SARS_CoV2_PCR"]  # , "Participant_Prior_Infection_Reported"]
-
     sql_table_dict["consumable.csv"] = ["Consumable", "Biospecimen_Consumable"]
     sql_table_dict["reagent.csv"] = ["Reagent", "Biospecimen_Reagent"]
     sql_table_dict["equipment.csv"] = ["Equipment", "Biospecimen_Equipment"]
-
     sql_table_dict["secondary_confirmation_test_result.csv"] = ["Secondary_Confirmatory_Test"]
     sql_table_dict["bsi_child.csv"] = ["BSI_Child_Aliquots"]
     sql_table_dict["bsi_parent.csv"] = ["BSI_Parent_Aliquots"]
     sql_table_dict["submission.csv"] = ["Submission"]
     sql_table_dict["shipping_manifest.csv"] = ["Shipping_Manifest"]
     sql_table_dict["CDC_Data.csv"] = ["CDC_Confrimation_Results"]
-
     sql_table_dict["Blinded_Evaluation_Panels.csv"] = ["Blinded_Validation_Test_Results"]
     '''
     return sql_table_dict
@@ -1487,45 +1455,32 @@ def get_sql_dict_vacc(s3_client, bucket):
     '''
     visit_list = ["Participant_Visit_Info", "Participant", "Specimens_Collected", "Participant_Comorbidities", "Comorbidities_Names",
                   "Participant_Other_Conditions", "Participant_Other_Condition_Names", "Drugs_And_Alcohol_Use", "Non_SARS_Covid_2_Vaccination_Status"]
-
     sql_table_dict["baseline.csv"] = visit_list
     sql_table_dict["follow_up.csv"] = [i for i in visit_list if i != "Participant"]  # Participant table does not exist in follow up
-
     sql_table_dict["aliquot.csv"] = ["Tube", "Aliquot"]
     sql_table_dict["biospecimen.csv"] = ["Tube", "Biospecimen"]
-
     sql_table_dict["assay_data.csv"] = ["Assay_Metadata", "Assay_Calibration", "Assay_Bio_Target"]
     sql_table_dict["assay_target.csv"] = ["Assay_Target"]
     sql_table_dict["assay_qc.csv"] = ["Assay_Quality_Controls"]
     sql_table_dict["assay_conversion.csv"] = ["Assay_Organism_Conversion"]
-
     sql_table_dict["study_design.csv"] = ["Study_Design"]
-
     sql_table_dict["consumable.csv"] = ["Consumable", "Biospecimen_Consumable"]
     sql_table_dict["reagent.csv"] = ["Reagent", "Biospecimen_Reagent"]
     sql_table_dict["equipment.csv"] = ["Equipment", "Biospecimen_Equipment"]
-
     sql_table_dict["shipping_manifest.csv"] = ["Shipping_Manifest"]
-
     sql_table_dict["covid_history.csv"] = ["Covid_History"]
     sql_table_dict["covid_hist_sql.csv"] = ["Covid_History"]
-
     sql_table_dict["covid_vaccination_status.csv"] = ["Covid_Vaccination_Status"]
     sql_table_dict["vac_status_sql.csv"] = ["Covid_Vaccination_Status"]
-
     sql_table_dict["biospecimen_test_result.csv"] = ["Biospecimen_Test_Results"]
     sql_table_dict["test_results_sql.csv"] = ["Biospecimen_Test_Results"]
-
     sql_table_dict["treatment_history.csv"] = ["Treatment_History"]
-
     sql_table_dict["autoimmune_cohort.csv"] = ["AutoImmune_Cohort"]
     sql_table_dict["cancer_cohort.csv"] = ["Cancer_Cohort"]
     sql_table_dict["hiv_cohort.csv"] = ["HIV_Cohort"]
     sql_table_dict["organ_transplant_cohort.csv"] = ["Organ_Transplant_Cohort"]
-
     sql_table_dict["visit_info_sql.csv"] = ["Participant_Visit_Info"]
     sql_table_dict["submission.csv"] = ["Submission"]
-
     sql_table_dict["bsi_child.csv"] = ["BSI_Child_Aliquots"]
     sql_table_dict["bsi_parent.csv"] = ["BSI_Parent_Aliquots"]
     '''
