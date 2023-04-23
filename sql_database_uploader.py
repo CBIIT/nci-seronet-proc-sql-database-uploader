@@ -409,7 +409,9 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
             if "covid_history.csv" in master_data_dict:
                 master_data_dict = check_decision_tree(master_data_dict)
             error_length = len(error_msg)
+            
             add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_data_dict, tables_to_check, [])
+            
             if len(error_msg) == error_length: #if the function does not generate new errors
                 conn.connection.commit()
             else:
@@ -1021,6 +1023,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         s3_client = boto3.client('s3')
                         s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Tube.csv')
                     '''
+                    
                     if len(x) == 0:
                         continue
                     x.drop_duplicates(inplace=True)
@@ -1133,6 +1136,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                 s3_client = boto3.client('s3')
                                 s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Biospecimen_new.csv')
                             '''
+                            
                             if len(new_data) > 0:
                                 new_data_count = len(new_data)
                                 print(f"## Adding {new_data_count} Rows to table: {curr_table} ##")
@@ -1152,8 +1156,16 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                 if curr_table == "Biospecimen_Test_Results":
                                     print("x")
                                 for column in new_data.columns:
-                                    if column not in list(sql_df.columns):
+                                    if column not in list(sql_df.columns) and column != "Submission_Index":
                                         new_data.drop(column, axis=1, inplace=True)
+                                #submission_index was deleted in the sql_df
+                                '''
+                                print(sql_df.columns)
+                                if curr_table == "Participant_Visit_Info":
+                                    csv_buffer = new_data.to_csv(index=False).encode()
+                                    s3_client = boto3.client('s3')
+                                    s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Participant_Visit_Info.csv')
+                                '''
                                 new_data.to_sql(name=curr_table, con=conn, if_exists="append", index=False)
                                 #conn.connection.commit()
                         except Exception as e:
