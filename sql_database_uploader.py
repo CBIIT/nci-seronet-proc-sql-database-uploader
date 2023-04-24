@@ -1095,9 +1095,10 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
 
                     if "Sunday_Prior_To_First_Visit" in output_file.columns:
                         #output_file["Sunday_Prior_To_First_Visit"] = output_file["Sunday_Prior_To_First_Visit"].replace(-1e9, datetime.date(2000,1,1))
-                        sql_df["Sunday_Prior_To_First_Visit"] = sql_df["Sunday_Prior_To_First_Visit"].replace("No Data", datetime.date(2000,1,1))
-                    if 'Submission_Index' not in primary_keys and 'Submission_Index' in sql_df.columns:
-                        sql_df.drop('Submission_Index', axis=1, inplace=True)
+                        #sql_df["Sunday_Prior_To_First_Visit"] = sql_df["Sunday_Prior_To_First_Visit"].replace("No Data", datetime.date(2000,1,1))
+                        sql_df.drop("Sunday_Prior_To_First_Visit", axis=1, inplace=True)
+                    #if 'Submission_Index' not in primary_keys and 'Submission_Index' in sql_df.columns:
+                        #sql_df.drop('Submission_Index', axis=1, inplace=True)
                     try:
                         z = output_file.merge(sql_df, how="outer", indicator=True)
                     except Exception:
