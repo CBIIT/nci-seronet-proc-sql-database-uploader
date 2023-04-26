@@ -316,7 +316,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         if "baseline.csv" in master_data_dict:
             master_data_dict = update_obesity_values(master_data_dict)
             x = master_dict['baseline.csv']["Data_Table"]
-            x = x.query("Age > 0")
+            #x = x.query("Age > 0")
             master_dict['baseline.csv']["Data_Table"] = x.drop_duplicates('Research_Participant_ID')
         #if study_type == "Vaccine_Response":
         #    cohort_file = r"C:\Users\breadsp2\Downloads\Release_1.0.0_by_cohort.xlsx"
@@ -409,9 +409,9 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
             if "covid_history.csv" in master_data_dict:
                 master_data_dict = check_decision_tree(master_data_dict)
             error_length = len(error_msg)
-            
+
             add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_data_dict, tables_to_check, [])
-            
+
             if len(error_msg) == error_length: #if the function does not generate new errors
                 conn.connection.commit()
             else:
@@ -423,6 +423,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
     except Exception as e:
         display_error_line(e)
         error_msg.append(str(e))
+    # update_norm_cancer(conn, engine)
     return sql_table_dict, all_submissions
 
 
@@ -689,7 +690,17 @@ def get_master_dict(master_data_dict, master_data_update, sql_column_df, sql_tab
                     primary_key = [i for i in primary_key if i in x.columns]
                     primary_key = list(set(primary_key))
                     if len(primary_key) > 0:
-                        x = x.drop_duplicates(primary_key, keep='last')
+                        x["Submission_Index"] = [int(i) for i in x["Submission_Index"]]
+                        x = x.sort_values(primary_key + ["Submission_Index"])
+                        if key in ['shipping_manifest.csv']:
+                            x = x.drop_duplicates(primary_key, keep='last')
+                        else:
+                            first_data = x.drop_duplicates(primary_key, keep='first')
+                            last_data = x.drop_duplicates(primary_key, keep='last')
+                            last_data.drop("Submission_Index", axis=1, inplace=True)
+                            x = last_data.merge(first_data[primary_key + ["Submission_Index"]])
+                if "Cohort" in x.columns:
+                    x = x.query("Cohort not in ('nan')")
                 master_data_dict[key]["Data_Table"] = x
             except Exception as e:
                 error_msg.append(str(e))
@@ -717,8 +728,9 @@ def add_visit_info(df, curr_file, primary_key):
         primary_key.append("Cohort")
         primary_key.append("Visit_Number")
         return df, primary_key
+    list_of_visits = list(range(1,20)) + [str(i) for i in list(range(1,20))]
     df["Visit_Info_ID"] = (df["Research_Participant_ID"] + " : " + [i[0] for i in df["Type_Of_Visit"]] +
-                           ["%02d" % (int(i),) for i in df['Visit_Number']])
+                           ["%02d" % (int(i),) if i in list_of_visits else i for i in df['Visit_Number']])
     return df, primary_key
 
 
@@ -783,7 +795,7 @@ def round_data(data_table, test_col):
             curr_data = round(float(data_table.loc[x, test_col]), 1)
             if (curr_data * 10) % 10 == 0.0:
                 curr_data = int(curr_data)
-            data_table.loc[x, test_col] = curr_data
+            data_table.loc[x, test_col] = float(curr_data)
         except Exception:
             data_table.loc[x, test_col] = str(data_table.loc[x, test_col])
     return data_table
@@ -793,7 +805,7 @@ def clean_up_tables(curr_table):
     if "Submission_Index" in curr_table.columns:
         x = curr_table.drop("Submission_Index", axis=1)
         x.replace("", float("NaN"), inplace=True)
-        #x.dropna(axis=0, how="all", thresh=None, subset=None, inplace=True)
+        x.dropna(axis=0, how="all", thresh=None, subset=None, inplace=True)
         x.dropna(axis=0, how="all", subset=None, inplace=True)
         z = curr_table["Submission_Index"].to_frame()
         curr_table = x.merge(z, left_index=True, right_index=True)
@@ -875,7 +887,7 @@ def fix_aliquot_ids(master_data_dict, keep_order, sql_column_df):
         master_data_dict["aliquot.csv"]["Data_Table"]["Aliquot_Volume"] = z
         z = master_data_dict["aliquot.csv"]["Data_Table"]
         z.sort_values("Submission_Index", axis=0, ascending=True, inplace=True)
-        z.drop_duplicates("Aliquot_ID", keep=keep_order, inplace=True)
+        #z.drop_duplicates("Aliquot_ID", keep=keep_order, inplace=True)
         master_data_dict["aliquot.csv"]["Data_Table"] = correct_var_types(z, sql_column_df, "Aliquot")
     if "shipping_manifest.csv" in master_data_dict:
         z = master_data_dict["shipping_manifest.csv"]["Data_Table"]
@@ -889,7 +901,7 @@ def fix_aliquot_ids(master_data_dict, keep_order, sql_column_df):
         master_data_dict["shipping_manifest.csv"]["Data_Table"]["Volume"] = z
         z = master_data_dict["shipping_manifest.csv"]["Data_Table"]
         z.sort_values("Submission_Index", axis=0, ascending=True, inplace=True)
-        z.drop_duplicates("Current Label", keep=keep_order, inplace=True)
+        #z.drop_duplicates("Current Label", keep=keep_order, inplace=True)
         master_data_dict["shipping_manifest.csv"]["Data_Table"] = correct_var_types(z, sql_column_df, "Shipping_Manifest")
     return master_data_dict
 
@@ -921,18 +933,24 @@ def upload_assay_data(data_dict, bucket_name, s3_client):
     #  populate the assay data tables which are independant from submissions
     #assay_data, assay_target, all_qc_data, converion_file = get_box_data_v2.get_assay_data("CBC_Data")
     assay_data, assay_target, all_qc_data, converion_file = get_assay_data(s3_client, "CBC_Data", bucket_name)
-    if len(assay_data) > 0 and len(all_qc_data) > 0 and len(assay_target) > 0 and len(converion_file) > 0:
-        assay_data["Calibration_Type"] = assay_data["Calibration_Type"].replace("", "No Data Provided")
-        assay_data["Calibration_Type"] = assay_data["Calibration_Type"].replace("N/A", "No Data Provided")
-        data_dict = add_assay_to_dict(data_dict, "assay_data.csv", assay_data)
-        all_qc_data.replace("", "No Data Provided", inplace=True)
-        all_qc_data.replace(np.nan, "No Data Provided", inplace=True)
-        all_qc_data["Comments"] = all_qc_data["Comments"].replace("No Data Provided", "")
-        data_dict = add_assay_to_dict(data_dict, "assay_qc.csv", all_qc_data)
-        data_dict = add_assay_to_dict(data_dict, "assay_target.csv", assay_target)
-        data_dict = add_assay_to_dict(data_dict, "assay_conversion.csv", converion_file)
-        print("## The assay data has been uploaded")
-        success_msg.append("## The assay data has been uploaded")
+    all_qc_data.replace("", "No Data Provided", inplace=True)
+    all_qc_data.replace(np.nan, "No Data Provided", inplace=True)
+    all_qc_data["Comments"] = all_qc_data["Comments"].replace("No Data Provided", "")
+
+    #if len(assay_data) > 0 and len(all_qc_data) > 0 and len(assay_target) > 0 and len(converion_file) > 0:
+    assay_data["Calibration_Type"] = assay_data["Calibration_Type"].replace("", "No Data Provided")
+    assay_data["Calibration_Type"] = assay_data["Calibration_Type"].replace("N/A", "No Data Provided")
+
+    data_dict = add_assay_to_dict(data_dict, "assay_data.csv", assay_data)
+    data_dict = add_assay_to_dict(data_dict, "assay_target.csv", assay_target)
+    data_dict = add_assay_to_dict(data_dict, "assay_qc.csv", all_qc_data)
+    data_dict = add_assay_to_dict(data_dict, "assay_conversion.csv", converion_file)
+
+    validation_panel_assays = get_assay_data("Validation")
+    data_dict = add_assay_to_dict(data_dict, "validation_assay_data.csv", validation_panel_assays)
+
+    print("## The assay data has been uploaded")
+    success_msg.append("## The assay data has been uploaded")
 
 
     # validation_panel_assays = get_box_data.get_assay_data("Validation")
@@ -1023,7 +1041,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         s3_client = boto3.client('s3')
                         s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Tube.csv')
                     '''
-                    
+
                     if len(x) == 0:
                         continue
                     x.drop_duplicates(inplace=True)
@@ -1047,6 +1065,10 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 output_file = fix_aliquot_ids(output_file, "first", sql_column_df)
                 output_file.replace("N/A", "No Data", inplace=True)
                 output_file.replace("nan", "No Data", inplace=True)
+
+                if "Biospecimens_Collected" in output_file.columns:
+                    output_file.replace('nan', 'No Specimens Collected', inplace=True)
+
 
                 comment_col = [i for i in output_file.columns if "Comments" in i]
                 if len(comment_col) > 0:
@@ -1086,7 +1108,6 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     if 'Data_Release_Version' in output_file.columns:
                         output_file.drop('Data_Release_Version', axis=1, inplace=True)
 
-                    print()
                     output_file.replace('Lymphocytes', 'PBMC', inplace=True)
                     output_file.replace('Gist', 'GIST', inplace=True)
                     if curr_table == "Biospecimen":
@@ -1103,7 +1124,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         z = output_file.merge(sql_df, how="outer", indicator=True)
                     except Exception:
                         sql_df["Sample_Dilution"] = sql_df["Sample_Dilution"].to_string()
-                        z = output_file.merge(sql_df, how="outer", indicator=True)
+                        z = output_file.merge(sql_df[output_file.columns], how="outer", indicator=True)
                     finally:
                         new_data = z.query("_merge == 'left_only'")       # new or update data
                 except Exception as e:
@@ -1137,7 +1158,6 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                 s3_client = boto3.client('s3')
                                 s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Biospecimen_new.csv')
                             '''
-                            
                             if len(new_data) > 0:
                                 new_data_count = len(new_data)
                                 print(f"## Adding {new_data_count} Rows to table: {curr_table} ##")
@@ -1156,6 +1176,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                     new_data = new_data.drop_duplicates(['Visit_Info_ID', 'Health_Condition_Or_Disease', 'Treatment', 'Dosage', 'Dosage_Units'])
                                 if curr_table == "Biospecimen_Test_Results":
                                     print("x")
+                                if "Assay_Target_Organism" in new_data.columns:
+                                    new_data = new_data.query("Assay_Target_Organism == Assay_Target_Organism")
                                 for column in new_data.columns:
                                     if column not in list(sql_df.columns) and column != "Submission_Index":
                                         new_data.drop(column, axis=1, inplace=True)
@@ -1185,6 +1207,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                             row_count = len(update_data)
                             print(f"\n## Updating {row_count} Rows in table: {curr_table} ##\n")
                             success_msg.append(f"## Updating {row_count} Rows in table: {curr_table} ##")
+                            if "Assay_Target_Organism" in update_data.columns:
+                                update_data = update_data.query("Assay_Target_Organism == Assay_Target_Organism")
                             update_tables(conn, engine, primary_keys, update_data, curr_table)
                         except:
                             display_error_line(e)
@@ -1392,6 +1416,10 @@ def update_tables(conn, engine, primary_keys, update_table, sql_table):
             update_table.drop("_merge", inplace=True, axis=1)
     except Exception as e:
         print(e)
+
+    if 'Cancer_Description_Or_ICD10_codes' in update_table.columns:
+        update_table = update_table[['Visit_Info_ID','Cancer_Description_Or_ICD10_codes']]
+
     col_list = update_table.columns.tolist()
     col_list = [i for i in col_list if i not in primary_keys]
 
@@ -1500,6 +1528,38 @@ def get_sql_dict_vacc(s3_client, bucket):
 
     return sql_table_dict
 
+def update_norm_cancer(conn, engine):
+    harm_table = pd.read_sql(("SELECT * FROM Normalized_Cancer_Names_v2;"), conn)
+    cancer_dict = pd.read_sql(("SELECT * FROM Normalized_Cancer_Dictionary;"), conn)
+    cancer_names = pd.read_sql(("SELECT Visit_Info_ID, Cancer_Description_Or_ICD10_codes FROM Comorbidities_Names;"), conn)
+    full_table = pd.DataFrame(columns=['Visit_Info_ID', 'Original Cancer Name', 'Harmonized Cancer Name', 'SEER Category', "Found_In_Dict"])
+
+    cancer_names.fillna('Not Reported', inplace=True)
+    for curr_row in cancer_names.index:
+
+        z = cancer_names["Cancer_Description_Or_ICD10_codes"][curr_row].split("|")
+        z = [i.strip() for i in z]
+        z = pd.DataFrame(z, columns= ["Cancer"])
+        z["Visit_Info_ID"] = cancer_names["Visit_Info_ID"][curr_row]
+        merge_1 = z.merge(cancer_dict, how="left", indicator="Found_In_Dict")
+        merge_1 = merge_1.rename(columns={'Cancer': 'Original Cancer Name'})
+        full_table = pd.concat([full_table, merge_1])
+
+
+    full_table.drop_duplicates(inplace=True)
+    full_table.to_sql("Normalized_Cancer_Names_v2",con=engine, if_exists="append", index=False)
+
+    #full_table = full_table.query("`Original Cancer Name` != ''")         #remove records that are not found
+    z = full_table.merge(harm_table, on=["Visit_Info_ID", 'Original Cancer Name'], how="left")
+    merge_data = z.query("`Harmonized Cancer Name_x` != `Harmonized Cancer Name_y`")
+    new_data = merge_data.query("`Harmonized Cancer Name_y` != `Harmonized Cancer Name_y`")
+
+    new_data = new_data[['Visit_Info_ID', 'Original Cancer Name', 'Harmonized Cancer Name_x', 'SEER Category_x']]
+    new_data.columns = [i.replace("_x","") for i in new_data.columns]
+    new_data.to_sql("Normalized_Cancer_Names_v2",con=engine, if_exists="append", index=False)
+
+    print("x")
+    return full_table
 
 
 #get box data function
@@ -1553,7 +1613,12 @@ def get_assay_data(s3_client, data_type, bucket_name):
 
         return all_assay_data, all_target_data, all_qc_data, converion_file
     elif data_type == "Validation":
-        print("x")
+        #print("x")
+        assay_file = assay_dir + "Seronet_Reference_Panels/"+ "validation_panel_assays.xlsx"
+        #curr_data = pd.read_excel(assay_file, na_filter=False, engine='openpyxl')
+        obj = s3_client.get_object(Bucket=bucket_name, Key=assay_file)
+        curr_data = pd.read_excel(obj['Body'].read(), na_filter=False, engine='openpyxl')
+        return curr_data
 
 
 def populate_df(curr_assay, assay_file, bucket_name, s3_client):
