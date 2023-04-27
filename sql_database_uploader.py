@@ -805,7 +805,7 @@ def clean_up_tables(curr_table):
     if "Submission_Index" in curr_table.columns:
         x = curr_table.drop("Submission_Index", axis=1)
         x.replace("", float("NaN"), inplace=True)
-        x.dropna(axis=0, how="all", thresh=None, subset=None, inplace=True)
+        #x.dropna(axis=0, how="all", thresh=None, subset=None, inplace=True)
         x.dropna(axis=0, how="all", subset=None, inplace=True)
         z = curr_table["Submission_Index"].to_frame()
         curr_table = x.merge(z, left_index=True, right_index=True)
@@ -1879,7 +1879,7 @@ def make_time_line(connection_tuple):
 
 # Research_Participant_ID	Primary_Cohort	Normalized_Visit_Index	Submitted_Visit_Num	Duration_From_Visit_1	SARS-CoV-2_Vaccine_Type	Vaccination_Status	Duration_Between_Vaccine_and_Visit	Data_Status
     #uni_part = ['27_400335']
-
+    error_list = []
     for curr_part in uni_part:
         #if curr_part == '41_100001':
         #    print("x")
@@ -1959,6 +1959,7 @@ def make_time_line(connection_tuple):
         except Exception as e:
             error_msg.append(str(e))
             display_error_line(e)
+        
         try:
             x = x.merge(pending_samples, how="left")
             x["Serum_Volume_For_FNL"][sub_data.index] = sub_data["Submitted_Serum_Volumne"]
@@ -1977,8 +1978,14 @@ def make_time_line(connection_tuple):
                         'Num_PBMC_Vials_For_FNL', 'Submitted_PBMC_Vials', "PBMC_Vials_Received"]
             all_vacc = pd.concat([all_vacc, x[col_list_1]])
             all_sample = pd.concat([all_sample, x[col_list_2]])
+        
         except Exception as e:
             display_error_line(e) #stop the whole function when there is nothing to add to the table
+            error_list.append(curr_part)
+        
+    error_list = list(set(error_list))
+    print(error_list)
+
     try:
         all_vacc.reset_index(inplace=True, drop=True)
         all_sample.reset_index(inplace=True, drop=True)
