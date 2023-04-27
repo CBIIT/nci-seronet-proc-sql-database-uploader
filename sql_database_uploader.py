@@ -1983,8 +1983,8 @@ def make_time_line(connection_tuple):
             display_error_line(e) #stop the whole function when there is nothing to add to the table
             error_list.append(curr_part)
         
-        error_list = list(set(error_list))
-        print(error_list)
+    error_list = list(set(error_list))
+    print(error_list)
 
     try:
         all_vacc.reset_index(inplace=True, drop=True)
