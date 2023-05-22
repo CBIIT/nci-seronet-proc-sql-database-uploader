@@ -1841,21 +1841,27 @@ def make_time_line(connection_tuple):
     #                            "sum(case when b.Biospecimen_Type = 'PBMC' then 1 else 0 end) as 'Submitted_PBMC_Vials' FROM Biospecimen as b " +
     #                            "join Aliquot as a on b.Biospecimen_ID = a.Biospecimen_ID group by b.Visit_Info_ID"), conn)
 
-    data_samples = pd.read_sql(("Select b.Visit_Info_ID, round(sum(case when b.Biospecimen_Type = 'Serum' then ali.Aliquot_Volume else 0 end), 1) as 'Submitted_Serum_Volumne', " +
-                                "sum(case when b.Biospecimen_Type = 'PBMC' then 1 else 0 end) as 'Submitted_PBMC_Vials' " +
-                                "from `seronetdb-Vaccine_Response`.Biospecimen as b " +
-                                "left join  " +
-                                "(select * from `seronetdb-Vaccine_Response`.Aliquot as a " +
-                                    "where (a.Aliquot_Comments not in ('Aliquot does not exist; mistakenly included in initial file')  " +
-                                    "and a.Aliquot_Comments not in ('Aliquot was unable to be located.') " +
-                                    "and a.Aliquot_Comments not in ('Previously submitted in error') " +
-                                    "and a.Aliquot_Comments not in ('Serum aliquots were not collected and cannot be shipped.')) or " +
-                                    "a.Aliquot_Comments is NULL) as ali " +
-                                "on b.Biospecimen_ID = ali.Biospecimen_ID " +
-                                "where (b.Biospecimen_Comments not in ('Previously submitted in error') and " + 
-                                    "  b.Biospecimen_Comments not in ('Biospecimens were not collected.')) or " +
-                                    "  b.Biospecimen_Comments is NULL " +
-                                  "group by b.Visit_Info_ID"), conn)
+    data_samples = pd.read_sql(("Select b.Visit_Info_ID, " +
+                                "round(sum(case when b.Biospecimen_Type = 'Serum' then ali.Aliquot_Volume else 0 end), 1) as 'Submitted_Serum_Volumne',   " +
+                                "round(sum(case when bp.`Material Type` is NULL  then 0 " +
+                                "               when bp.`Material Type` = 'SERUM' and `Vial Status` not in ('Empty') then bp.Volume " +
+                                "               when bp.`Material Type` = 'SERUM' and `Vial Status` in ('Empty')  then ali.Aliquot_Volume else 0 end), 1) as 'Serum_Volume_Received',  " +
+                                "sum(case when b.Biospecimen_Type = 'PBMC' then 1 else 0 end) as 'Submitted_PBMC_Vials', " +
+                                "sum(case when bp.`Material Type` is NULL  then 0 " +
+                                "         when bp.`Material Type` = 'PBMC' then 1 else 0 end) as 'PBMC_Vials_Received' " +
+                                "from Biospecimen as b " +
+                                "left join (select * from Aliquot as a " +
+                                "           where (a.Aliquot_Comments not in ('Aliquot does not exist; mistakenly included in initial file') " +
+                                "                  and a.Aliquot_Comments not in ('Aliquot was unable to be located.') " +
+                                "                  and a.Aliquot_Comments not in ('Previously submitted in error') " +
+                                "                  and a.Aliquot_Comments not in ('Serum aliquots were not collected and cannot be shipped.')) or " +
+                                "           a.Aliquot_Comments is NULL) as ali " +
+                                "on b.Biospecimen_ID = ali.Biospecimen_ID  " +
+                                "left join BSI_Parent_Aliquots as bp on ali.Aliquot_ID = bp.`Current Label` " +
+                                "where (b.Biospecimen_Comments not in ('Previously submitted in error') and " +
+                                "       b.Biospecimen_Comments not in ('Biospecimens were not collected.')) or " +
+                                "b.Biospecimen_Comments is NULL " +
+                                "group by b.Visit_Info_ID "), conn)
 
 
     BSI_Inventory = pd.read_sql(("SELECT b.Visit_Info_ID, round(sum(case when b.Biospecimen_Type = 'Serum' and bp.`Vial Status` not in ('Empty') then bp.Volume " +
