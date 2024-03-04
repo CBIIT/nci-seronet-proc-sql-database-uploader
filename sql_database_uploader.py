@@ -556,6 +556,8 @@ def clean_tube_names(curr_table):
     # curr_cols = [i.replace("Tube_Type_Expiration_", "Tube_Lot_Expiration_") for i in curr_cols]
     curr_cols = [i.replace("Biospecimen_Company", "Biospecimen_Collection_Company") for i in curr_cols]
     curr_table.columns = curr_cols
+    curr_table["Tube_Type_Lot_Number"] = [str(i) for i in curr_table["Tube_Type_Lot_Number"]]
+    curr_table["Tube_Type_Catalog_Number"] = [str(i) for i in curr_table["Tube_Type_Catalog_Number"]]
     return curr_table
 
 
@@ -678,6 +680,8 @@ def get_master_dict(master_data_dict, master_data_update, sql_column_df, sql_tab
 
         if isinstance(primary_key, str):
             primary_key = [primary_key]
+        if "Biospecimens_Collected" in primary_key: 
+            primary_key.remove("Biospecimens_Collected")
         if key in master_data_update.keys():
             try:
                 x = pd.concat([master_data_dict[key]["Data_Table"], master_data_update[key]["Data_Table"]])
@@ -717,6 +721,10 @@ def add_visit_info(df, curr_file, primary_key):
         df['Type_Of_Visit'] = "Baseline"
         df['Visit_Number'] = "1"
         df['Unscheduled_Visit'] = "No"
+        
+        #df['Type_Of_Visit'] = "MISPA"
+        #df['Visit_Number'] = "-1"
+        #df['Unscheduled_Visit'] = "Yes"
     elif curr_file == "follow_up.csv":
         df['Type_Of_Visit'] = "Follow_up"
         base = df.query("Baseline_Visit == 'Yes'")
@@ -727,7 +735,8 @@ def add_visit_info(df, curr_file, primary_key):
         primary_key.append("Cohort")
         primary_key.append("Visit_Number")
         return df, primary_key
-    list_of_visits = list(range(1,20)) + [str(i) for i in list(range(1,20))]
+    
+    list_of_visits = list(range(1,20)) + [str(i) for i in list(range(1,20))] + [-1, '-1']
     df["Visit_Info_ID"] = (df["Research_Participant_ID"] + " : " + [i[0] for i in df["Type_Of_Visit"]] +
                            ["%02d" % (int(i),) if i in list_of_visits else i for i in df['Visit_Number']])
     return df, primary_key
@@ -774,8 +783,10 @@ def correct_var_types(data_table, sql_column_df, curr_table):
             var_type = "VARCHAR(255)"
         if var_type in ['INTEGER', 'FLOAT', 'DOUBLE']:
             data_table[curr_col].replace("N/A", np.nan, inplace=True)
-        if curr_col in ["Age", "Storage_Time_in_Mr_Frosty", "Biospecimen_Collection_to_Test_Duration", "BMI"]:
-            data_table = round_data(data_table, curr_col)
+        if curr_col in ["Age", "Storage_Time_in_Mr_Frosty", "Biospecimen_Collection_to_Test_Duration", "BMI", "Derived_Result"]:
+            data_table = round_data(data_table, curr_col, 1)
+        if curr_col in ["Derived_Result"]:
+            data_table = round_data(data_table, curr_col, 3)
         elif curr_col in ["Sample_Dilution"] and "Subaliquot_ID" in data_table.columns:  # special formating for reference panel testing
             data_table[curr_col].replace("none", "1", inplace=True)   #no dilution is same as 1:1 dilution
             data_table[curr_col] = [str(f"{Decimal(i):.2E}") for i in data_table[curr_col]]
@@ -786,12 +797,12 @@ def correct_var_types(data_table, sql_column_df, curr_table):
     return data_table
 
 
-def round_data(data_table, test_col):
+def round_data(data_table, test_col, round_unit):
     for x in data_table.index:
         try:
             if data_table.loc[x, test_col] == "90+":
                 data_table.loc[x, test_col] = 90
-            curr_data = round(float(data_table.loc[x, test_col]), 1)
+            curr_data = round(float(data_table.loc[x, test_col]), round_unit)
             if (curr_data * 10) % 10 == 0.0:
                 curr_data = int(curr_data)
             data_table.loc[x, test_col] = float(curr_data)
@@ -1120,6 +1131,19 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     #if 'Submission_Index' not in primary_keys and 'Submission_Index' in sql_df.columns:
                         #sql_df.drop('Submission_Index', axis=1, inplace=True)
                     try:
+                        if "Derived_Result" in output_file.columns:
+                            output_file["Derived_Result"].replace("No Data", -1e+09, inplace=True)
+                            output_file["Derived_Result"] = output_file["Derived_Result"].astype(str)
+                        if "Sample_Dilution" in output_file.columns:
+                            output_file["Sample_Dilution"] = output_file["Sample_Dilution"].astype(str)
+                        if "Biospecimens_Collected" in output_file.columns:
+                            output_file["Biospecimens_Collected"].replace("PBMC|serum", "PBMC|Serum", inplace=True)
+                            output_file["Biospecimens_Collected"].replace("serum", "Serum", inplace=True)
+                        if "Biospecimens_Collected" in sql_df.columns:
+                            sql_df["Biospecimens_Collected"].replace("PBMC|serum", "PBMC|Serum", inplace=True)
+                            sql_df["Biospecimens_Collected"].replace("serum", "Serum", inplace=True)
+                        
+                        output_file = output_file.replace('27_403194-400_02', '27_403194_400_02')
                         z = output_file.merge(sql_df, how="outer", indicator=True)
                     except Exception:
                         sql_df["Sample_Dilution"] = sql_df["Sample_Dilution"].to_string()
@@ -1163,20 +1187,21 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                 success_msg.append(f"## Adding {new_data_count} Rows to table: {curr_table} ##")
                                 new_data.replace("No Data", np.nan, inplace=True)
                                 new_data.replace(datetime.date(2000,1,1), np.nan, inplace=True)
-                                if "Current Label" in new_data.columns:
-                                    new_data = new_data.query("`Current Label` not in ['32_441013_102_02', '32_441006_311_01', '32_441131_101_02', " +
-                                                              "'32_441040_102_02', '32_441040_102_01', '32_441057_102_02', '32_441057_102_01', '32_441047_102_02', " +
-                                                              "'32_441047_102_01', '32_441040_101_02', '32_441040_101_01', '32_441041_101_01', '32_441041_101_02', " +
-                                                              "'32_441047_101_01', '32_441047_101_02', '32_441057_101_01','32_441057_101_02']")
+                                #if "Current Label" in new_data.columns:
+                                    #new_data = new_data.query("`Current Label` not in ['32_441013_102_02', '32_441006_311_01', '32_441131_101_02', " +
+                                    #                          "'32_441040_102_02', '32_441040_102_01', '32_441057_102_02', '32_441057_102_01', '32_441047_102_02', " +
+                                    #                          "'32_441047_102_01', '32_441040_101_02', '32_441040_101_01', '32_441041_101_01', '32_441041_101_02', " +
+                                    #                          "'32_441047_101_01', '32_441047_101_02', '32_441057_101_01','32_441057_101_02']")
 
-                                    new_data = new_data.query("`Current Label` not in ['32_441083_311_01','32_441153_311_01','32_441112_304_01','32_441095_305_01','32_441108_301_01', " +
-                                                              "'32_441139_305_01','32_441013_311_01','32_441146_304_01','32_441165_304_01','32_441131_101_01']")
+                                    #new_data = new_data.query("`Current Label` not in ['32_441083_311_01','32_441153_311_01','32_441112_304_01','32_441095_305_01','32_441108_301_01', " +
+                                    #                          "'32_441139_305_01','32_441013_311_01','32_441146_304_01','32_441165_304_01','32_441131_101_01']")
                                 if "Treatment_History" in curr_table:
                                     new_data = new_data.drop_duplicates(['Visit_Info_ID', 'Health_Condition_Or_Disease', 'Treatment', 'Dosage', 'Dosage_Units'])
-                                if curr_table == "Biospecimen_Test_Results":
-                                    print("x")
                                 if "Assay_Target_Organism" in new_data.columns:
                                     new_data = new_data.query("Assay_Target_Organism == Assay_Target_Organism")
+                                if "Biospecimen_ID" in new_data.columns and "Visit_Info_ID" in new_data.columns:
+                                    new_data.sort_values(["Biospecimen_ID", "Visit_Info_ID"], inplace=True)
+                                    new_data.drop_duplicates("Biospecimen_ID", keep="last", inplace=True)
                                 for column in new_data.columns:
                                     if column not in list(sql_df.columns) and column != "Submission_Index":
                                         new_data.drop(column, axis=1, inplace=True)
@@ -1285,7 +1310,8 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
     else:
         if "Visit_Info_ID" in col_list:
             visit_data = pd.read_sql(("SELECT Visit_Info_ID, Research_Participant_ID, Visit_Number FROM Participant_Visit_Info;"), conn)
-            list_of_visits = list(range(1,20)) + [str(i) for i in list(range(1,20))] 
+            list_of_visits = list(range(1,20)) + [str(i) for i in list(range(1,20))]
+            list_of_visits = list_of_visits + [-1, '-1']
             visit_data["Visit_Number"] = [int(i) if i in list_of_visits else i for i in visit_data["Visit_Number"]]
             if curr_file == "baseline.csv":
                 x["Visit_Number"] = 1
@@ -1313,7 +1339,13 @@ def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
         try:
             tube_data.replace("N/A", "No Data", inplace=True)
             x.replace("N/A", "No Data", inplace=True)
+            x.fillna("No Data", inplace=True)
+            
+            if 'Visit_Number' in x.columns:
+                x['Visit_Number'] = [str(i) for i in x['Visit_Number']]
             for curr_col in x.columns:
+                if curr_col in ['Submission_Index', "Collection_Tube_Type_Expiration_Date", "Aliquot_Tube_Type_Expiration_Date"]:
+                    continue
                 try:
                     x[curr_col] = x[curr_col].str.strip()
                 except AttributeError:
@@ -1419,6 +1451,9 @@ def update_tables(conn, engine, primary_keys, update_table, sql_table):
     if 'Cancer_Description_Or_ICD10_codes' in update_table.columns:
         update_table = update_table[['Visit_Info_ID','Cancer_Description_Or_ICD10_codes']]
 
+    if "Primary_Study_Cohort" in update_table.columns:
+        update_table = update_table.drop("Primary_Study_Cohort", axis=1)
+
     col_list = update_table.columns.tolist()
     col_list = [i for i in col_list if i not in primary_keys]
 
@@ -1440,8 +1475,8 @@ def update_tables(conn, engine, primary_keys, update_table, sql_table):
             update_str = update_str.replace("'NULL'", "NULL")
             update_str = update_str.replace("'No Data'", "NULL")
             update_str = update_str.replace("'2000-01-01'", "NULL")
-            update_str = update_str.replace("`Data_Release_Version` = NULL", "`Data_Release_Version` = '1.0.0'") # outdated, replace later
-            update_str = update_str.replace("`Data_Release_Version` = '2'", "`Data_Release_Version` = '2.0.0'")
+            update_str = update_str.replace("`Data_Release_Version` = NULL", "`Data_Release_Version` = '3.0.0'") # outdated, replace later
+            update_str = update_str.replace("`Data_Release_Version` = '2'", "`Data_Release_Version` = '3.0.0'")
 
             sql_query = (f"UPDATE {sql_table} set {update_str} where {key_str %tuple(primary_value)}")
             #for make_time_line function
