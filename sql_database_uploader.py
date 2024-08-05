@@ -13,6 +13,7 @@ import os
 from dateutil.parser import parse
 import datetime
 import numpy as np
+import itertools
 #from import_loader_v2 import pd, np, pd_s3, boto3, datetime, os, re
 #from import_loader_v2 import get_box_data_v2, parse, pathlib
 #import mysql.connector
@@ -252,7 +253,7 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
         all_submissions = [i for i in enumerate(zip(all_submissions, cbc_code))]
         # Filter list by submissions already done
         all_submissions = [i for i in all_submissions if i[1][0] not in done_submissions["Submission_S3_Path"].tolist()]
-        print(all_submissions)
+        #print(all_submissions)
         #  all_submissions = [i for i in all_submissions if "CBC02" in i[1][0]]
 
     except Exception as e:
@@ -317,6 +318,33 @@ def Db_loader_main(file_key, sub_folder, connection_tuple, s3_client, bucket_nam
             x = master_dict['baseline.csv']["Data_Table"]
             #x = x.query("Age > 0")
             master_dict['baseline.csv']["Data_Table"] = x.drop_duplicates('Research_Participant_ID')
+        
+        if "covid_vaccination_status.csv" in master_data_dict:
+            x = master_dict["covid_vaccination_status.csv"]["Data_Table"]
+            x.sort_values(["Research_Participant_ID", "Vaccination_Status", "Submission_Index"], inplace=True)
+            # x = x.query("Age > 0")
+            master_dict["covid_vaccination_status.csv"]["Data_Table"] = x
+            
+        if "treatment_history.csv" in master_data_dict and "treatment_history_prov.csv" in master_data_dict:
+            tbase = master_dict["treatment_history.csv"]["Data_Table"]
+            tprov = master_dict["treatment_history_prov.csv"]["Data_Table"]
+            tbase.replace("Baseline(1)", "1", inplace=True)
+            tprov.replace("Baseline(1)", "1", inplace=True)
+            tprov.drop(["Comments", "Submission_Index", "Submission_CBC"], axis=1, inplace=True)
+            tbase = tbase.merge(tprov, how="left")
+            tbase.drop_duplicates(inplace=True)
+            master_dict["treatment_history.csv"]["Data_Table"] = tbase
+        
+        if "cancer_cohort.csv" in master_data_dict and "cancer_cohort_prov.csv" in master_data_dict:
+            cbase = master_dict["cancer_cohort.csv"]["Data_Table"]
+            cprov = master_dict["cancer_cohort_prov.csv"]["Data_Table"]
+            cbase.replace("Baseline(1)", "1", inplace=True)
+            cprov.replace("Baseline(1)", "1", inplace=True)
+            cprov = cprov[['Research_Participant_ID', 'Cohort', 'Visit_Number', 'Cancer_Provenance']]
+            cbase = cbase.merge(cprov, how="left")
+            cbase.drop_duplicates(inplace=True)
+            master_dict["cancer_cohort.csv"]["Data_Table"] = cbase
+        
         #if study_type == "Vaccine_Response":
         #    cohort_file = r"C:\Users\breadsp2\Downloads\Release_1.0.0_by_cohort.xlsx"
         #    x = pd.read_excel(cohort_file)
@@ -583,7 +611,6 @@ def get_upload_info(s3_client, bucket_name, curr_sub, sub_folder):
     sub_name = curr_table.columns[1]
     return upload_date, intent, sub_name
 
-
 def get_tables_to_load(s3_client, bucket, folders, curr_sub, conn, sub_name, index, upload_date, intent, master_dict, data_release):
     """Takes current submission and gets all csv files into pandas tables """
     files = [i["Key"] for i in folders if curr_sub[1][0] in i["Key"]]
@@ -593,6 +620,7 @@ def get_tables_to_load(s3_client, bucket, folders, curr_sub, conn, sub_name, ind
     if len(data_dict) > 0:
         master_dict = combine_dictionaries(master_dict, data_dict)
     return master_dict
+
 
 
 def get_data_dict(s3_client, bucket, files, conn, curr_sub, sub_name, index, upload_date, intent, data_release):
@@ -619,9 +647,38 @@ def get_data_dict(s3_client, bucket, files, conn, curr_sub, sub_name, index, upl
                 curr_table["Submission_Index"] = str(index)
             curr_table = curr_table.loc[~(curr_table == '').all(axis=1)]
             curr_table.rename(columns={"Cohort": "CBC_Classification"})
+            remove_ids = ['27_300089','27_300106','27_300168','27_300537','27_400094']
+            if 'Research_Participant_ID' in curr_table.columns:
+                curr_table = curr_table[curr_table["Research_Participant_ID"].str.contains('|'.join(remove_ids)) == False]
+                curr_table = curr_table.query("Research_Participant_ID != '' and Research_Participant_ID == Research_Participant_ID")
+            if 'Biospecimen_ID' in curr_table.columns:
+                curr_table = curr_table[curr_table["Biospecimen_ID"].str.contains('|'.join(remove_ids)) == False]
+                curr_table = curr_table.query("Biospecimen_ID != '' and Biospecimen_ID == Biospecimen_ID")
+            if 'Aliquot_ID' in curr_table.columns:
+                curr_table = curr_table[curr_table["Aliquot_ID"].str.contains('|'.join(remove_ids)) == False]
+            if "Cohort" in curr_table.columns:
+                curr_table["Cohort"].replace("Organ_Transplant", "Transplant", inplace=True)
+                curr_table["Cohort"].replace("Healthy_Control", "Healthy Control", inplace=True)
         except Exception as e:
             error_msg.append(str(e))
             display_error_line(e)
+
+        #if split_path[1] == "northwell_treatment.csv" or split_path[1] == "treatment.csv":
+        #    split_path = (split_path[0], "treatment_history.csv")
+        #if  split_path[1] == "treatment.csv":
+        #    split_path = (split_path[0], "treatment_history.csv")
+        if split_path[1] == "followup.csv":
+            split_path = (split_path[0], "follow_up.csv")
+        elif split_path[1] == "consumables.csv":
+            split_path = (split_path[0], "consumable.csv")
+        elif split_path[1] == "cancer_cohort.csv":
+            #some cancer durations were ogroanly reported in days then later converted to years
+            try:
+                curr_table["new_index"] = [ 0 if i == "Not Reported" else float(i) for i in curr_table["Year_Of_Diagnosis_Duration_From_Index"]]
+            except Exception as e:
+                print(e)
+#            curr_table = curr_table.query("new_index >= -50")
+
         curr_table = clean_up_tables(curr_table)
         curr_table["Submission_CBC"] = curr_sub[1][1]
         if "secondary_confirmation" in split_path[1]:
@@ -682,11 +739,33 @@ def get_master_dict(master_data_dict, master_data_update, sql_column_df, sql_tab
             primary_key = [primary_key]
         if "Biospecimens_Collected" in primary_key: 
             primary_key.remove("Biospecimens_Collected")
-        if key in master_data_update.keys():
+        if key in master_data_update.keys() | master_data_dict.keys():
             try:
-                x = pd.concat([master_data_dict[key]["Data_Table"], master_data_update[key]["Data_Table"]])
+                if key in master_data_dict and key in master_data_update:
+                    x = pd.concat([master_data_dict[key]["Data_Table"], master_data_update[key]["Data_Table"]])
+                elif key in master_data_dict:
+                    x = master_data_dict[key]["Data_Table"]
+                elif key in master_data_update:
+                    x = master_data_update[key]["Data_Table"]
                 x.reset_index(inplace=True, drop=True)
                 x = correct_var_types(x, sql_column_df, table)
+                if "Cohort" in x.columns:
+                    x = x.query("Cohort not in ('nan')")
+                    part_list = list(set(x["Research_Participant_ID"]))
+                    for curr_part in part_list:
+                        if curr_part[:2] in ['41']:
+                            pass
+                        else:
+                            test_id = x.query("Research_Participant_ID == @curr_part")
+                            if len(list(set(test_id["Cohort"]))) == 1:
+                                pass
+                            else:
+                                test_id["Submission_Index"] = [int(i) for i in test_id['Submission_Index']]
+                                last_index = max([float(i) for i in test_id['Submission_Index']])
+                                correct_cohort = list(set(test_id.query("Submission_Index == @last_index")["Cohort"]))
+                                x["Cohort"][test_id.index] = correct_cohort[0]
+
+
                 if "Visit_Info_ID" in primary_key and "Visit_Info_ID" not in x.columns:
                     x, primary_key = add_visit_info(x, key, primary_key)
                 if key not in ["submission.csv"]:
@@ -702,8 +781,7 @@ def get_master_dict(master_data_dict, master_data_update, sql_column_df, sql_tab
                             last_data = x.drop_duplicates(primary_key, keep='last')
                             last_data.drop("Submission_Index", axis=1, inplace=True)
                             x = last_data.merge(first_data[primary_key + ["Submission_Index"]])
-                if "Cohort" in x.columns:
-                    x = x.query("Cohort not in ('nan')")
+            
                 master_data_dict[key]["Data_Table"] = x
             except Exception as e:
                 error_msg.append(str(e))
@@ -749,7 +827,8 @@ def convert_data_type(v, var_type):
         return v
     if isinstance(v, datetime.time) and var_type.lower() == "time":
         return v
-
+    if var_type == "VARCHAR(255)":
+        return v
     if v == "Baseline(1)":
         v = 1
 
@@ -982,6 +1061,7 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
     key_count = pd.crosstab(sql_column_df["Table_Name"], sql_column_df["Foreign_Key_Count"])
     key_count.reset_index(inplace=True)
     key_count = key_count.query("Table_Name not in @done_tables")
+    key_count = key_count.query("Table_Name not in ['Biospecimen_Consumable','Biospecimen_Reagent','Biospecimen_Equipment']")
     if len(key_count) == 0:
         return
 
@@ -1000,13 +1080,14 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
             continue
         y = sql_column_df.query("Table_Name == @curr_table")
         y = y.query("Autoincrement != True")
+        y = y.query("Column_Name not in ['Samples_Not_Useable']")
         sql_df = pd.read_sql((f"Select * from {curr_table}"), conn)
         sql_df = sql_df[y["Column_Name"].tolist()]
         # sql_df = sql_df.astype(str)
         sql_df.replace("No Data", "NULL", inplace=True)  # if no data in sql this is wrong, used to correct
-        sql_df.fillna("No Data", inplace=True)  # replace NULL values from sql with "No Data" for merge purposes
+        sql_df.fillna("N/A", inplace=True)  # replace NULL values from sql with "No Data" for merge purposes
 
-        num_cols = sql_column_df.query("Var_Type in ('INTEGER', 'INTERGER', 'FLOAT', 'DOUBLE')")["Column_Name"]
+        num_cols = sql_column_df.query(f"Table_Name == '{curr_table}' and Var_Type in ('INTEGER', 'INTERGER', 'FLOAT', 'DOUBLE')")["Column_Name"]
         num_cols = list(set(num_cols))
         char_cols = sql_column_df[sql_column_df['Var_Type'].str.contains("CHAR")]["Column_Name"]
         char_cols = list(set(char_cols))
@@ -1052,9 +1133,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         s3_client.put_object(Body=csv_buffer, Bucket='seronet-trigger-submissions-passed', Key='Tube.csv')
                     '''
 
-                    if len(x) == 0:
-                        continue
-                    x.drop_duplicates(inplace=True)
+                    if len(x) > 0:
+                        x.drop_duplicates(inplace=True)
                 except Exception as e:
                     error_msg.append(str(e))
                     display_error_line(e)
@@ -1073,8 +1153,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
 
                 output_file.reset_index(inplace=True, drop=True)
                 output_file = fix_aliquot_ids(output_file, "first", sql_column_df)
-                output_file.replace("N/A", "No Data", inplace=True)
-                output_file.replace("nan", "No Data", inplace=True)
+                #output_file.replace("N/A", "No Data", inplace=True)
+                #output_file.replace("nan", "No Data", inplace=True)
 
                 if "Biospecimens_Collected" in output_file.columns:
                     output_file.replace('nan', 'No Specimens Collected', inplace=True)
@@ -1083,10 +1163,16 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 comment_col = [i for i in output_file.columns if "Comments" in i]
                 if len(comment_col) > 0:
                     output_file[comment_col[0]] = output_file[comment_col[0]].replace("No Data", "")
-                    sql_df[comment_col[0]] = sql_df[comment_col[0]].replace("No Data", "")
+                    output_file[comment_col[0]] = output_file[comment_col[0]].replace("N/A", "")
+                    try:
+                        sql_df[comment_col[0]] = sql_df[comment_col[0]].replace("No Data", "")
+                        sql_df[comment_col[0]] = sql_df[comment_col[0]].replace("N/A", "")
+                    except Exception:
+                        print(f"{comment_col} not in database")
 
                 if curr_table not in ["Tube", "Aliquot", "Consumable", "Reagent", "Equipment"]:
                     col_list = [i for i in sql_df.columns if i not in ["Derived_Result", "Raw_Result", "BMI"]]
+                    col_list = [i for i in col_list if i.find("ICD10") == -1 and i.find("ICD_10") == -1]
                     sql_df[col_list] = sql_df[col_list].replace("\.0", "", regex=True)
 
                     col_list = [i for i in output_file.columns if i not in ["Derived_Result", "Raw_Result", "BMI", 'Sample_Dilution']]
@@ -1108,8 +1194,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         for i in primary_keys:
                             output_file[i] = output_file[i].replace("No Data", "")   # primary keys cant be null
 
-                    sql_df.replace("", "No Data", inplace=True)
-                    output_file.replace({"": "No Data"}, inplace=True)
+                    if curr_table + "_Comments" in primary_keys:
+                        primary_keys.remove(curr_table + "_Comments")
                     sql_df = sql_df.replace(np.nan, -1e9)
                     output_file = output_file.replace(np.nan, -1e9)
 
@@ -1123,6 +1209,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     if curr_table == "Biospecimen":
                         output_file = output_file.sort_values(["Biospecimen_ID", "Biospecimen_Collection_Date_Duration_From_Index"])
                         output_file.drop_duplicates(["Visit_Info_ID", "Biospecimen_ID"], keep="last", inplace=True)
+                    if curr_table == "Covid_Vaccination_Status":
+                        output_file = cleanup_Covid_hist(output_file, conn)
 
                     if "Sunday_Prior_To_First_Visit" in output_file.columns:
                         #output_file["Sunday_Prior_To_First_Visit"] = output_file["Sunday_Prior_To_First_Visit"].replace(-1e9, datetime.date(2000,1,1))
@@ -1130,6 +1218,15 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         sql_df.drop("Sunday_Prior_To_First_Visit", axis=1, inplace=True)
                     #if 'Submission_Index' not in primary_keys and 'Submission_Index' in sql_df.columns:
                         #sql_df.drop('Submission_Index', axis=1, inplace=True)
+                    if len([i for i in output_file.columns if "Expiration_Date" in i]) > 0:
+                        output_file[[i for i in output_file.columns if "Expiration_Date" in i][0]].replace(-1e9, "0000-00-00", inplace=True)
+                        output_file[[i for i in output_file.columns if "Expiration_Date" in i][0]] = output_file[[i for i in output_file.columns if "Expiration_Date" in i][0]].astype(str)
+                    if len([i for i in sql_df.columns if "Expiration_Date" in i]) > 0:
+                        sql_df[[i for i in sql_df.columns if "Expiration_Date" in i][0]] = sql_df[[i for i in sql_df.columns if "Expiration_Date" in i][0]].astype(str)
+                    if curr_table == "Treatment_History":
+                        output_file["Treat_lower"] = output_file["Treatment"].str.lower()
+                        output_file.drop_duplicates(['Visit_Info_ID', 'Health_Condition_Or_Disease', 'Treat_lower'], inplace=True, keep="first")
+                        output_file.drop("Treat_lower", axis=1, inplace=True)
                     try:
                         if "Derived_Result" in output_file.columns:
                             output_file["Derived_Result"].replace("No Data", -1e+09, inplace=True)
@@ -1142,7 +1239,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                         if "Biospecimens_Collected" in sql_df.columns:
                             sql_df["Biospecimens_Collected"].replace("PBMC|serum", "PBMC|Serum", inplace=True)
                             sql_df["Biospecimens_Collected"].replace("serum", "Serum", inplace=True)
-                        
+                        if "Samples_Not_Useable" in sql_df.columns:
+                            sql_df.drop("Samples_Not_Useable", axis=1, inplace=True)
                         output_file = output_file.replace('27_403194-400_02', '27_403194_400_02')
                         z = output_file.merge(sql_df, how="outer", indicator=True)
                     except Exception:
@@ -1154,7 +1252,9 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                     #error_msg.append(str(e))
                     display_error_line(e)
                     new_data = []
-
+                if "Primary_Study_Cohort" in new_data:
+                    new_data.drop("Primary_Study_Cohort", axis=1, inplace=True)
+                    new_data = new_data.merge(sql_df[["Visit_Info_ID","Primary_Study_Cohort"]], how="left")
                 if len(new_data) > 0:
                     new_data.drop("_merge", inplace=True, axis=1)
                     x = sql_column_df.query("Var_Type in ['INTEGER', 'FLOAT']")
@@ -1202,9 +1302,16 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                                 if "Biospecimen_ID" in new_data.columns and "Visit_Info_ID" in new_data.columns:
                                     new_data.sort_values(["Biospecimen_ID", "Visit_Info_ID"], inplace=True)
                                     new_data.drop_duplicates("Biospecimen_ID", keep="last", inplace=True)
-                                for column in new_data.columns:
-                                    if column not in list(sql_df.columns) and column != "Submission_Index":
-                                        new_data.drop(column, axis=1, inplace=True)
+                                if "Aliquot_ID" in new_data.columns:
+                                    new_data = new_data.query("Aliquot_ID not in ['14_M27007_101_01','27_200089_300_01','27_200089_300_02','27_200089_300_03', " +
+                                                              "'27_200089_306_01','27_200089_306_02','27_200089_306_03','27_200089_400_01','27_200089_400_02','27_200089_406_01','27_200089_406_02', " +
+                                                              "'27_200106_301_01','27_200106_301_02','27_200106_301_03','27_200106_401_01','27_200106_401_02','27_200168_301_01','27_200168_301_02', " +
+                                                              "'27_200168_301_03','27_200168_401_01','27_200168_401_02','27_200537_301_01','27_200537_301_02','27_200537_301_03','27_200537_401_01','27_200537_401_02']")
+                                if curr_table == "Cancer_Cohort":
+                                    new_data = new_data.query("Visit_Info_ID != '27_200318 : B01'")
+                                #for column in new_data.columns:
+                                #    if column not in list(sql_df.columns) and column != "Submission_Index":
+                                #        new_data.drop(column, axis=1, inplace=True)
                                 #submission_index was deleted in the sql_df
                                 '''
                                 print(sql_df.columns)
@@ -1249,6 +1356,11 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 prim_table.fillna("No Data", inplace=True)  # replace NULL values from sql with "No Data" for merge purposes
                 processing_file.replace("N/A", "No Data", inplace=True)
                 prim_table = prim_table[[i for i in prim_table.columns if "Comments" not in i]]
+                date_col = [i for i in prim_table.columns if "Date" in i]
+                try:
+                    prim_table[date_col[0]] = prim_table[date_col[0]].apply(lambda x: str(x))
+                except Exception as e:
+                    print(e)
                 df_obj = processing_file.select_dtypes(['object'])
                 processing_file[df_obj.columns] = df_obj.apply(lambda x: x.str.strip())
                 processing_file = correct_var_types(processing_file, sql_column_df, curr_table)
@@ -1259,6 +1371,8 @@ def add_tables_to_database(engine, conn, sql_table_dict, sql_column_df, master_d
                 test_table = test_table.merge(sql_table, how="left", indicator=True)
                 test_table = test_table.query("_merge == 'left_only'").drop("_merge", axis=1)
                 test_table.drop_duplicates(inplace=True)
+                bio_table = pd.read_sql(("SELECT Biospecimen_ID, Biospecimen_Type FROM Biospecimen"), conn)
+                test_table = test_table.merge(bio_table["Biospecimen_ID"])
                 test_table.to_sql(name="Biospecimen_" + curr_table, con=conn, if_exists="append", index=False)
                 #conn.connection.commit()
     if len(not_done) > 0:
@@ -1276,6 +1390,15 @@ def fix_num_cols(df, num_cols, data_type):
 
             df[col_name] = df[col_name].replace("No Data", np.nan)
             df[col_name] = df[col_name].replace("nan", np.nan)
+            try:
+                df[col_name].replace("N/A", np.nan, inplace=True)
+                df[col_name].fillna(np.nan, inplace=True)
+                if 'INTEGER' in num_cols or 'INTERGER' in num_cols:
+                    df[col_name] = [int(i) for i in df[col_name]]
+                else:
+                    df[col_name] = [round(float(i), 4)  for i in df[col_name]]
+            except Exception as e:
+                print(e)
     return df
 
 
@@ -1287,6 +1410,32 @@ def fix_char_cols(df, char_cols):
             df[col_name] = [str(i).replace("", "No Data") if len(i) == 0 else i for i in df[col_name]]  # fill blank cells with no data
     return df
 
+def cleanup_Covid_hist(output_file, conn):
+    part_list = list(set(output_file["Research_Participant_ID"]))
+    for curr_part in part_list:
+
+        x = output_file.query("Research_Participant_ID == @curr_part and Vaccination_Status not in ['Unvaccinated','No vaccination event reported']")
+        x["Vaccination_Status_New"] = [i.replace(":Bivalent","") for i in x["Vaccination_Status"]]
+        x["Vaccination_Status_New"] = [i.replace(":Monovalent XBB.1.5","") for i in x["Vaccination_Status_New"]]
+        x = x.query("Covid_Vaccination_Status_Comments not in ['Record previously submitted in error.', 'Vaccine Status does not exist, input error']")
+
+        dups =x[x.duplicated(["Vaccination_Status_New"], keep='last')]
+        if len(dups) > 0:
+            #dups['Covid_Vaccination_Status_Comments'] = 'Record previously submitted in error.'
+            output_file = output_file.merge(dups, how="left", indicator = True)
+            z = output_file.query("_merge in ['both']")
+            output_file.drop(["_merge", "Vaccination_Status_New"], axis=1, inplace=True)
+            output_file['Covid_Vaccination_Status_Comments'][z.index] = 'Record previously submitted: Duplicated.'
+
+    return output_file
+
+def cleanup_Drugs(output_file):
+    x = output_file.query("Drug_Use in ['Not Reported']")
+    output_file["Drug_Type"][x.index] = "Drug Type Not Reported"
+        
+    x = output_file.query("Drug_Use not in ['Never user','Current non-user'] and Drug_Type in ['Unknown', 'N/A','Drug Not Disclosed']")
+    output_file["Drug_Type"][x.index] = "Drug Type Not Reported"
+    return output_file
 
 def get_col_names(x, y, conn, curr_table, curr_file, sql_column_df):
     col_list = y["Column_Name"].tolist()
@@ -1448,8 +1597,8 @@ def update_tables(conn, engine, primary_keys, update_table, sql_table):
     except Exception as e:
         print(e)
 
-    if 'Cancer_Description_Or_ICD10_codes' in update_table.columns:
-        update_table = update_table[['Visit_Info_ID','Cancer_Description_Or_ICD10_codes']]
+    #if 'Cancer_Description_Or_ICD10_codes' in update_table.columns:
+    #    update_table = update_table[['Visit_Info_ID','Cancer_Description_Or_ICD10_codes']]
 
     if "Primary_Study_Cohort" in update_table.columns:
         update_table = update_table.drop("Primary_Study_Cohort", axis=1)
